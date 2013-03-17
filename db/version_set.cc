@@ -47,10 +47,10 @@ static uint64_t MaxFileSizeForLevel(int level) {
   static const uint64_t bytes[] = {2 * 1048576,
                                    2 * 1048576,
                                    2 * 1048576,
-                                   2 * 1048576,
-                                   2 * 1048576,
-                                   2 * 1048576,
-                                   2 * 1048576};
+                                   4 * 1048576,
+                                   4 * 1048576,
+                                   4 * 1048576,
+                                   4 * 1048576};
   return bytes[level];
 }
 
