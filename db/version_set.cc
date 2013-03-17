@@ -31,7 +31,7 @@ static const int64_t kMaxGrandParentOverlapBytes = 10 * (2 * 1048576);
 static const int64_t kExpandedCompactionByteSizeLimit = 25 * (2 * 1048576);
 
 static double MaxBytesForLevel(int level) {
-  assert(level < kNumLevels);
+  assert(level < leveldb::config::kNumLevels);
   static const double bytes[] = {10 * 1048576.0,
                                  10 * 1048576.0,
                                  100 * 1048576.0,
@@ -43,7 +43,7 @@ static double MaxBytesForLevel(int level) {
 }
 
 static uint64_t MaxFileSizeForLevel(int level) {
-  assert(level < kNumLevels);
+  assert(level < leveldb::config::kNumLevels);
   static const uint64_t bytes[] = {2 * 1048576,
                                    2 * 1048576,
                                    2 * 1048576,
