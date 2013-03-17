@@ -174,8 +174,8 @@ EOF
       int main() {}
 EOF
     if [ "$?" = 0 ]; then
-        COMMON_FLAGS="$COMMON_FLAGS -DSNAPPY"
-        PLATFORM_LIBS="$PLATFORM_LIBS -lsnappy"
+        COMMON_FLAGS="$COMMON_FLAGS"
+        PLATFORM_LIBS="$PLATFORM_LIBS"
     fi
 
     # Test whether tcmalloc is available

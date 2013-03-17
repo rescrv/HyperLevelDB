@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <stdio.h>
+#include "db/dbformat.h"
 #include "db/filename.h"
 #include "db/log_reader.h"
 #include "db/log_writer.h"
@@ -20,30 +21,37 @@
 
 namespace leveldb {
 
-static const int kTargetFileSize = 2 * 1048576;
-
 // Maximum bytes of overlaps in grandparent (i.e., level+2) before we
 // stop building a single file in a level->level+1 compaction.
-static const int64_t kMaxGrandParentOverlapBytes = 10 * kTargetFileSize;
+static const int64_t kMaxGrandParentOverlapBytes = 10 * (2 * 1048576);
 
 // Maximum number of bytes in all compacted files.  We avoid expanding
 // the lower level file set of a compaction if it would make the
 // total compaction cover more than this many bytes.
-static const int64_t kExpandedCompactionByteSizeLimit = 25 * kTargetFileSize;
+static const int64_t kExpandedCompactionByteSizeLimit = 25 * (2 * 1048576);
 
 static double MaxBytesForLevel(int level) {
-  // Note: the result for level zero is not really used since we set
-  // the level-0 compaction threshold based on number of files.
-  double result = 10 * 1048576.0;  // Result for both level-0 and level-1
-  while (level > 1) {
-    result *= 10;
-    level--;
-  }
-  return result;
+  assert(level < kNumLevels);
+  static const double bytes[] = {10 * 1048576.0,
+                                 10 * 1048576.0,
+                                 100 * 1048576.0,
+                                 1000 * 1048576.0,
+                                 10000 * 1048576.0,
+                                 100000 * 1048576.0,
+                                 1000000 * 1048576.0};
+  return bytes[level];
 }
 
 static uint64_t MaxFileSizeForLevel(int level) {
-  return kTargetFileSize;  // We could vary per level to reduce number of files?
+  assert(level < kNumLevels);
+  static const uint64_t bytes[] = {2 * 1048576,
+                                   2 * 1048576,
+                                   2 * 1048576,
+                                   2 * 1048576,
+                                   2 * 1048576,
+                                   2 * 1048576,
+                                   2 * 1048576};
+  return bytes[level];
 }
 
 static int64_t TotalFileSize(const std::vector<FileMetaData*>& files) {
