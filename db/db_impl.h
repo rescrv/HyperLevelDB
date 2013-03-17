@@ -79,10 +79,12 @@ class DBImpl : public DB {
   // Delete any unneeded files and stale in-memory entries.
   void DeleteObsoleteFiles();
 
-  // Compact the in-memory write buffer to disk.  Switches to a new
-  // log-file/memtable and writes a new descriptor iff successful.
-  Status CompactMemTable()
-      EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  // A background thread to compact the in-memory write buffer to disk.
+  // Switches to a new log-file/memtable and writes a new descriptor iff
+  // successful.
+  static void CompactMemTableWrapper(void* db)
+  { reinterpret_cast<DBImpl*>(db)->CompactMemTableThread(); }
+  void CompactMemTableThread();
 
   Status RecoverLogFile(uint64_t log_number,
                         VersionEdit* edit,
@@ -96,9 +98,9 @@ class DBImpl : public DB {
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   WriteBatch* BuildBatchGroup(Writer** last_writer);
 
-  void MaybeScheduleCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-  static void BGWork(void* db);
-  void BackgroundCall();
+  static void CompactLevelWrapper(void* db)
+  { reinterpret_cast<DBImpl*>(db)->CompactLevelThread(); }
+  void CompactLevelThread();
   Status BackgroundCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   void CleanupCompaction(CompactionState* compact)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
@@ -128,7 +130,6 @@ class DBImpl : public DB {
   // State below is protected by mutex_
   port::Mutex mutex_;
   port::AtomicPointer shutting_down_;
-  port::CondVar bg_cv_;          // Signalled when background work finishes
   MemTable* mem_;
   MemTable* imm_;                // Memtable being compacted
   port::AtomicPointer has_imm_;  // So bg thread can detect non-NULL imm_
@@ -146,8 +147,16 @@ class DBImpl : public DB {
   // part of ongoing compactions.
   std::set<uint64_t> pending_outputs_;
 
-  // Has a background compaction been scheduled or is running?
-  bool bg_compaction_scheduled_;
+  port::Mutex bg_mtx_; // XXX
+  bool levels_locked_[leveldb::config::kNumLevels];
+  int num_bg_threads_;
+  // Tell the foreground that background has done something of note
+  port::CondVar bg_fg_cv_;
+  // Communicate with compaction background thread
+  int bg_compaction_scheduled_;
+  port::CondVar bg_compaction_cv_;
+  // Communicate with memtable->L0 background thread
+  port::CondVar bg_memtable_cv_;
 
   // Information for a manual compaction
   struct ManualCompaction {
