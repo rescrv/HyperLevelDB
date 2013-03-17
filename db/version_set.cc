@@ -1287,7 +1287,8 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
       std::vector<FileMetaData*> expanded1;
       current_->GetOverlappingInputs(level+1, &new_start, &new_limit,
                                      &expanded1);
-      if (expanded1.size() == c->inputs_[1].size()) {
+      if (expanded1.size() == c->inputs_[1].size() ||
+          expanded0.size() - c->inputs_[0].size() >= expanded1.size() - c->inputs_[1].size()) {
         Log(options_->info_log,
             "Expanding@%d %d+%d (%ld+%ld bytes) to %d+%d (%ld+%ld bytes)\n",
             level,
