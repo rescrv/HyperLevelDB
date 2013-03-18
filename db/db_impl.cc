@@ -129,6 +129,7 @@ DBImpl::DBImpl(const Options& options, const std::string& dbname)
       log_(NULL),
       tmp_batch_(new WriteBatch),
       bg_fg_cv_(&mutex_),
+      allow_background_activity_(false),
       num_bg_threads_(0),
       bg_compaction_cv_(&mutex_),
       bg_memtable_cv_(&mutex_),
@@ -136,6 +137,7 @@ DBImpl::DBImpl(const Options& options, const std::string& dbname)
   mutex_.Lock();
   mem_->Ref();
   has_imm_.Release_Store(NULL);
+  // For now, only two threads are safe.
   env_->StartThread(&DBImpl::CompactMemTableWrapper, this);
   env_->StartThread(&DBImpl::CompactLevelWrapper, this);
   num_bg_threads_ = 2;
@@ -435,7 +437,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number,
     }
 
     if (mem->ApproximateMemoryUsage() > options_.write_buffer_size) {
-      status = WriteLevel0Table(mem, edit, NULL);
+      status = WriteLevel0Table(mem, edit, NULL, NULL);
       if (!status.ok()) {
         // Reflect errors immediately so that conditions like full
         // file-systems cause the DB::Open() to fail.
@@ -447,7 +449,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number,
   }
 
   if (status.ok() && mem != NULL) {
-    status = WriteLevel0Table(mem, edit, NULL);
+    status = WriteLevel0Table(mem, edit, NULL, NULL);
     // Reflect errors immediately so that conditions like full
     // file-systems cause the DB::Open() to fail.
   }
@@ -458,11 +460,14 @@ Status DBImpl::RecoverLogFile(uint64_t log_number,
 }
 
 Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
-                                Version* base) {
+                                Version* base, uint64_t* number) {
   mutex_.AssertHeld();
   const uint64_t start_micros = env_->NowMicros();
   FileMetaData meta;
   meta.number = versions_->NewFileNumber();
+  if (number) {
+    *number = meta.number;
+  }
   pending_outputs_.insert(meta.number);
   Iterator* iter = mem->NewIterator();
   Log(options_.info_log, "Level-0 table #%llu: started",
@@ -480,7 +485,6 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
       (unsigned long long) meta.file_size,
       s.ToString().c_str());
   delete iter;
-  pending_outputs_.erase(meta.number);
 
   // Note that if file_size is zero, the file has been deleted and
   // should not be added to the manifest.
@@ -490,6 +494,9 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
     const Slice max_user_key = meta.largest.user_key();
     if (base != NULL) {
       level = base->PickLevelForMemTableOutput(min_user_key, max_user_key);
+      while (level > 0 && levels_locked_[level]) {
+        --level;
+      }
     }
     edit->AddFile(level, meta.number, meta.file_size,
                   meta.smallest, meta.largest);
@@ -504,6 +511,9 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
 
 void DBImpl::CompactMemTableThread() {
   MutexLock l(&mutex_);
+  while (!shutting_down_.Acquire_Load() && !allow_background_activity_) {
+    bg_memtable_cv_.Wait();
+  }
   while (!shutting_down_.Acquire_Load()) {
     while (!shutting_down_.Acquire_Load() && (imm_ == NULL || levels_locked_[0])) {
       bg_memtable_cv_.Wait();
@@ -512,15 +522,13 @@ void DBImpl::CompactMemTableThread() {
       break;
     }
     levels_locked_[0] = true;
-    mutex_.Unlock();
-    MutexLock l2(&bg_mtx_);
-    mutex_.Lock();
 
     // Save the contents of the memtable as a new Table
     VersionEdit edit;
     Version* base = versions_->current();
     base->Ref();
-    Status s = WriteLevel0Table(imm_, &edit, base);
+    uint64_t number;
+    Status s = WriteLevel0Table(imm_, &edit, base, &number);
     base->Unref(); base = NULL;
 
     if (s.ok() && shutting_down_.Acquire_Load()) {
@@ -533,6 +541,8 @@ void DBImpl::CompactMemTableThread() {
       edit.SetLogNumber(logfile_number_);  // Earlier logs no longer needed
       s = versions_->LogAndApply(&edit, &mutex_);
     }
+
+    pending_outputs_.erase(number);
 
     if (s.ok()) {
       // Commit to the new state
@@ -637,6 +647,9 @@ Status DBImpl::TEST_CompactMemTable() {
 
 void DBImpl::CompactLevelThread() {
   MutexLock l(&mutex_);
+  while (!shutting_down_.Acquire_Load() && !allow_background_activity_) {
+    bg_compaction_cv_.Wait();
+  }
   while (!shutting_down_.Acquire_Load()) {
     while (!shutting_down_.Acquire_Load() &&
            manual_compaction_ == NULL &&
@@ -647,9 +660,6 @@ void DBImpl::CompactLevelThread() {
       break;
     }
     assert(manual_compaction_ == NULL || num_bg_threads_ == 2);
-    mutex_.Unlock();
-    MutexLock l2(&bg_mtx_);
-    mutex_.Lock();
 
     Status s = BackgroundCompaction();
 
@@ -694,13 +704,24 @@ Status DBImpl::BackgroundCompaction() {
         (m->end ? m->end->DebugString().c_str() : "(end)"),
         (m->done ? "(end)" : manual_end.DebugString().c_str()));
   } else {
-    c = versions_->PickCompaction();
+    c = versions_->PickCompaction(levels_locked_);
+    if (c) {
+      assert(!levels_locked_[c->level() + 0]);
+      assert(!levels_locked_[c->level() + 1]);
+      levels_locked_[c->level() + 0] = false;
+      levels_locked_[c->level() + 1] = false;
+    }
   }
 
   Status status;
 
   if (c == NULL) {
-    // Nothing to do
+    // Nothing to do so back off
+    bg_fg_cv_.SignalAll();
+    bg_memtable_cv_.Signal();
+    mutex_.Unlock();
+    env_->SleepForMicroseconds(1000);
+    mutex_.Lock();
   } else if (!is_manual && c->IsTrivialMove()) {
     // Move file to next level
     assert(c->num_input_files(0) == 1);
@@ -723,7 +744,10 @@ Status DBImpl::BackgroundCompaction() {
     c->ReleaseInputs();
     DeleteObsoleteFiles();
   }
+
   if (c) {
+    levels_locked_[c->level() + 0] = false;
+    levels_locked_[c->level() + 1] = false;
     delete c;
   }
 
@@ -1439,6 +1463,10 @@ Status DB::Open(const Options& options, const std::string& dbname,
       impl->bg_memtable_cv_.Signal();
     }
   }
+  impl->pending_outputs_.clear();
+  impl->allow_background_activity_ = true;
+  impl->bg_compaction_cv_.SignalAll();
+  impl->bg_memtable_cv_.SignalAll();
   impl->mutex_.Unlock();
   if (s.ok()) {
     *dbptr = impl;

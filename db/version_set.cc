@@ -782,38 +782,32 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
     }
   }
 
-  // Unlock during expensive MANIFEST log write
-  {
-    mu->Unlock();
-
-    // Write new record to MANIFEST log
+  // Write new record to MANIFEST log
+  if (s.ok()) {
+    std::string record;
+    edit->EncodeTo(&record);
+    s = descriptor_log_->AddRecord(record);
     if (s.ok()) {
-      std::string record;
-      edit->EncodeTo(&record);
-      s = descriptor_log_->AddRecord(record);
-      if (s.ok()) {
-        s = descriptor_file_->Sync();
-      }
-      if (!s.ok()) {
-        Log(options_->info_log, "MANIFEST write: %s\n", s.ToString().c_str());
-        if (ManifestContains(record)) {
-          Log(options_->info_log,
-              "MANIFEST contains log record despite error; advancing to new "
-              "version to prevent mismatch between in-memory and logged state");
-          s = Status::OK();
-        }
+      // XXX Unlock during expensive MANIFEST log write
+      s = descriptor_file_->Sync();
+    }
+    if (!s.ok()) {
+      Log(options_->info_log, "MANIFEST write: %s\n", s.ToString().c_str());
+      if (ManifestContains(record)) {
+        Log(options_->info_log,
+            "MANIFEST contains log record despite error; advancing to new "
+            "version to prevent mismatch between in-memory and logged state");
+        s = Status::OK();
       }
     }
+  }
 
-    // If we just created a new descriptor file, install it by writing a
-    // new CURRENT file that points to it.
-    if (s.ok() && !new_manifest_file.empty()) {
-      s = SetCurrentFile(env_, dbname_, manifest_file_number_);
-      // No need to double-check MANIFEST in case of error since it
-      // will be discarded below.
-    }
-
-    mu->Lock();
+  // If we just created a new descriptor file, install it by writing a
+  // new CURRENT file that points to it.
+  if (s.ok() && !new_manifest_file.empty()) {
+    s = SetCurrentFile(env_, dbname_, manifest_file_number_);
+    // No need to double-check MANIFEST in case of error since it
+    // will be discarded below.
   }
 
   // Install the new version
@@ -958,9 +952,6 @@ void VersionSet::MarkFileNumberUsed(uint64_t number) {
 
 void VersionSet::Finalize(Version* v) {
   // Precomputed best level for next compaction
-  int best_level = -1;
-  double best_score = -1;
-
   for (int level = 0; level < config::kNumLevels-1; level++) {
     double score;
     if (level == 0) {
@@ -982,15 +973,8 @@ void VersionSet::Finalize(Version* v) {
       const uint64_t level_bytes = TotalFileSize(v->files_[level]);
       score = static_cast<double>(level_bytes) / MaxBytesForLevel(level);
     }
-
-    if (score > best_score) {
-      best_level = level;
-      best_score = score;
-    }
+    v->compaction_scores_[level] = score;
   }
-
-  v->compaction_level_ = best_level;
-  v->compaction_score_ = best_score;
 }
 
 Status VersionSet::WriteSnapshot(log::Writer* log) {
@@ -1207,16 +1191,31 @@ Iterator* VersionSet::MakeInputIterator(Compaction* c) {
   return result;
 }
 
-Compaction* VersionSet::PickCompaction() {
+Compaction* VersionSet::PickCompaction(bool* levels) {
   Compaction* c;
   int level;
 
+  // Find the best level for a compaction where there is no compaction ongoing
+  int best_level = -1;
+  double best_score = -1;
+  for (int level = 0; level + 1 < config::kNumLevels; ++level) {
+    if (levels[level] || levels[level]) {
+      continue;
+    }
+    if (best_score < current_->compaction_scores_[level]) {
+      best_level = level;
+      best_score = current_->compaction_scores_[level];
+    }
+  }
+
   // We prefer compactions triggered by too much data in a level over
   // the compactions triggered by seeks.
-  const bool size_compaction = (current_->compaction_score_ >= 1);
-  const bool seek_compaction = (current_->file_to_compact_ != NULL);
+  const bool size_compaction = (best_score >= 1.0);
+  const bool seek_compaction = (current_->file_to_compact_ != NULL &&
+                                !levels[current_->file_to_compact_level_]);
+
   if (size_compaction) {
-    level = current_->compaction_level_;
+    level = best_level;
     assert(level >= 0);
     assert(level+1 < config::kNumLevels);
     c = new Compaction(level);

@@ -129,15 +129,15 @@ class Version {
   // Level that should be compacted next and its compaction score.
   // Score < 1 means compaction is not strictly needed.  These fields
   // are initialized by Finalize().
-  double compaction_score_;
-  int compaction_level_;
+  double compaction_scores_[config::kNumLevels];
 
   explicit Version(VersionSet* vset)
       : vset_(vset), next_(this), prev_(this), refs_(0),
         file_to_compact_(NULL),
-        file_to_compact_level_(-1),
-        compaction_score_(-1),
-        compaction_level_(-1) {
+        file_to_compact_level_(-1) {
+    for (int i = 0; i < config::kNumLevels; ++i) {
+      compaction_scores_[i] = -1;
+    }
   }
 
   ~Version();
@@ -213,7 +213,7 @@ class VersionSet {
   // Returns NULL if there is no compaction to be done.
   // Otherwise returns a pointer to a heap-allocated object that
   // describes the compaction.  Caller should delete the result.
-  Compaction* PickCompaction();
+  Compaction* PickCompaction(bool* levels);
 
   // Return a compaction object for compacting the range [begin,end] in
   // the specified level.  Returns NULL if there is nothing in that
@@ -235,7 +235,12 @@ class VersionSet {
   // Returns true iff some level needs a compaction.
   bool NeedsCompaction() const {
     Version* v = current_;
-    return (v->compaction_score_ >= 1) || (v->file_to_compact_ != NULL);
+    for (int i = 0; i < config::kNumLevels; ++i) {
+      if (v->compaction_scores_[i] >= 1.0) {
+        return true;
+      }
+    }
+    return v->file_to_compact_ != NULL;
   }
 
   // Add all files listed in any live version to *live.

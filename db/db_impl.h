@@ -91,7 +91,7 @@ class DBImpl : public DB {
                         SequenceNumber* max_sequence)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-  Status WriteLevel0Table(MemTable* mem, VersionEdit* edit, Version* base)
+  Status WriteLevel0Table(MemTable* mem, VersionEdit* edit, Version* base, uint64_t* number)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   Status MakeRoomForWrite(bool force /* compact even if there is room? */)
@@ -147,7 +147,7 @@ class DBImpl : public DB {
   // part of ongoing compactions.
   std::set<uint64_t> pending_outputs_;
 
-  port::Mutex bg_mtx_; // XXX
+  bool allow_background_activity_;
   bool levels_locked_[leveldb::config::kNumLevels];
   int num_bg_threads_;
   // Tell the foreground that background has done something of note
