@@ -21,10 +21,6 @@
 
 namespace leveldb {
 
-// Maximum bytes of overlaps in grandparent (i.e., level+2) before we
-// stop building a single file in a level->level+1 compaction.
-static const int64_t kMaxGrandParentOverlapBytes = 10 * (2 * 1048576);
-
 // Maximum number of bytes in all compacted files.  We avoid expanding
 // the lower level file set of a compaction if it would make the
 // total compaction cover more than this many bytes.
@@ -445,9 +441,6 @@ int Version::PickLevelForMemTableOutput(
       }
       GetOverlappingInputs(level + 2, &start, &limit, &overlaps);
       const int64_t sum = TotalFileSize(overlaps);
-      if (sum > kMaxGrandParentOverlapBytes) {
-        break;
-      }
       level++;
     }
   }
@@ -1319,13 +1312,6 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
     }
   }
 
-  // Compute the set of grandparent files that overlap this compaction
-  // (parent == level+1; grandparent == level+2)
-  if (level + 2 < config::kNumLevels) {
-    current_->GetOverlappingInputs(level + 2, &all_start, &all_limit,
-                                   &c->grandparents_);
-  }
-
   if (false) {
     Log(options_->info_log, "Compacting %d '%s' .. '%s'",
         level,
@@ -1374,10 +1360,7 @@ Compaction* VersionSet::CompactRange(
 Compaction::Compaction(int level)
     : level_(level),
       max_output_file_size_(MaxFileSizeForLevel(level)),
-      input_version_(NULL),
-      grandparent_index_(0),
-      seen_key_(false),
-      overlapped_bytes_(0) {
+      input_version_(NULL) {
   for (int i = 0; i < config::kNumLevels; i++) {
     level_ptrs_[i] = 0;
   }
@@ -1390,12 +1373,8 @@ Compaction::~Compaction() {
 }
 
 bool Compaction::IsTrivialMove() const {
-  // Avoid a move if there is lots of overlapping grandparent data.
-  // Otherwise, the move could create a parent file that will require
-  // a very expensive merge later on.
   return (num_input_files(0) == 1 &&
-          num_input_files(1) == 0 &&
-          TotalFileSize(grandparents_) <= kMaxGrandParentOverlapBytes);
+          num_input_files(1) == 0);
 }
 
 void Compaction::AddInputDeletions(VersionEdit* edit) {
@@ -1425,28 +1404,6 @@ bool Compaction::IsBaseLevelForKey(const Slice& user_key) {
     }
   }
   return true;
-}
-
-bool Compaction::ShouldStopBefore(const Slice& internal_key) {
-  // Scan to find earliest grandparent file that contains key.
-  const InternalKeyComparator* icmp = &input_version_->vset_->icmp_;
-  while (grandparent_index_ < grandparents_.size() &&
-      icmp->Compare(internal_key,
-                    grandparents_[grandparent_index_]->largest.Encode()) > 0) {
-    if (seen_key_) {
-      overlapped_bytes_ += grandparents_[grandparent_index_]->file_size;
-    }
-    grandparent_index_++;
-  }
-  seen_key_ = true;
-
-  if (overlapped_bytes_ > kMaxGrandParentOverlapBytes) {
-    // Too much overlap for current output; start new output
-    overlapped_bytes_ = 0;
-    return true;
-  } else {
-    return false;
-  }
 }
 
 void Compaction::ReleaseInputs() {

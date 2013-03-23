@@ -322,6 +322,7 @@ TEST(CorruptionTest, CompactionInputErrorParanoid) {
 
   Build(10);
   dbi->TEST_CompactMemTable();
+  env_.SleepForMicroseconds(1000000);
   ASSERT_EQ(1, Property("leveldb.num-files-at-level0"));
 
   Corrupt(kTableFile, 100, 1);

@@ -1010,13 +1010,9 @@ TEST(DBTest, SparseMerge) {
   Put("C",    "vc2");
   dbfull()->TEST_CompactMemTable();
 
-  // Compactions should not cause us to create a situation where
-  // a file overlaps too much data at the next level.
-  ASSERT_LE(dbfull()->TEST_MaxNextLevelOverlappingBytes(), 20*1048576);
-  dbfull()->TEST_CompactRange(0, NULL, NULL);
-  ASSERT_LE(dbfull()->TEST_MaxNextLevelOverlappingBytes(), 20*1048576);
-  dbfull()->TEST_CompactRange(1, NULL, NULL);
-  ASSERT_LE(dbfull()->TEST_MaxNextLevelOverlappingBytes(), 20*1048576);
+  // this test used to test whether or not compactions would push as high as
+  // possible.
+  // Hint: we don't do that anymore.
 }
 
 static bool Between(uint64_t val, uint64_t low, uint64_t high) {
