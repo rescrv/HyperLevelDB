@@ -517,13 +517,12 @@ void DBImpl::CompactMemTableThread() {
     bg_memtable_cv_.Wait();
   }
   while (!shutting_down_.Acquire_Load()) {
-    while (!shutting_down_.Acquire_Load() && (imm_ == NULL || levels_locked_[0])) {
+    while (!shutting_down_.Acquire_Load() && imm_ == NULL) {
       bg_memtable_cv_.Wait();
     }
     if (shutting_down_.Acquire_Load()) {
       break;
     }
-    levels_locked_[0] = true;
 
     // Save the contents of the memtable as a new Table
     VersionEdit edit;
@@ -568,7 +567,6 @@ void DBImpl::CompactMemTableThread() {
       mutex_.Lock();
     }
 
-    levels_locked_[0] = false;
     bg_fg_cv_.Signal();
     bg_memtable_cv_.Signal();
     bg_compaction_cv_.Signal();
