@@ -1212,7 +1212,7 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
   int best_level = -1;
   double best_score = -1;
   for (int level = 0; level + 1 < config::kNumLevels; ++level) {
-    if (levels[level] || levels[level]) {
+    if (levels[level] || levels[level + 1]) {
       continue;
     }
     if (best_score < current_->compaction_scores_[level]) {
