@@ -2009,6 +2009,8 @@ void BM_LogAndApply(int iters, int num_base_files) {
   Env* env = Env::Default();
 
   port::Mutex mu;
+  port::CondVar cv(&mu);
+  bool wt;
   MutexLock l(&mu);
 
   InternalKeyComparator cmp(BytewiseComparator());
@@ -2022,7 +2024,7 @@ void BM_LogAndApply(int iters, int num_base_files) {
     InternalKey limit(MakeKey(2*fnum+1), 1, kTypeDeletion);
     vbase.AddFile(2, fnum++, 1 /* file size */, start, limit);
   }
-  ASSERT_OK(vset.LogAndApply(&vbase, &mu));
+  ASSERT_OK(vset.LogAndApply(&vbase, &mu, &cv, &wt));
 
   uint64_t start_micros = env->NowMicros();
 
@@ -2032,7 +2034,7 @@ void BM_LogAndApply(int iters, int num_base_files) {
     InternalKey start(MakeKey(2*fnum), 1, kTypeValue);
     InternalKey limit(MakeKey(2*fnum+1), 1, kTypeDeletion);
     vedit.AddFile(2, fnum++, 1 /* file size */, start, limit);
-    vset.LogAndApply(&vedit, &mu);
+    vset.LogAndApply(&vedit, &mu, &cv, &wt);
   }
   uint64_t stop_micros = env->NowMicros();
   unsigned int us = stop_micros - start_micros;

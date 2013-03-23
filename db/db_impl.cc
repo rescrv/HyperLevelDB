@@ -133,6 +133,8 @@ DBImpl::DBImpl(const Options& options, const std::string& dbname)
       num_bg_threads_(0),
       bg_compaction_cv_(&mutex_),
       bg_memtable_cv_(&mutex_),
+      bg_log_cv_(&mutex_),
+      bg_log_occupied_(false),
       manual_compaction_(NULL) {
   mutex_.Lock();
   mem_->Ref();
@@ -539,7 +541,7 @@ void DBImpl::CompactMemTableThread() {
     if (s.ok()) {
       edit.SetPrevLogNumber(0);
       edit.SetLogNumber(logfile_number_);  // Earlier logs no longer needed
-      s = versions_->LogAndApply(&edit, &mutex_);
+      s = versions_->LogAndApply(&edit, &mutex_, &bg_log_cv_, &bg_log_occupied_);
     }
 
     pending_outputs_.erase(number);
@@ -729,7 +731,7 @@ Status DBImpl::BackgroundCompaction() {
     c->edit()->DeleteFile(c->level(), f->number);
     c->edit()->AddFile(c->level() + 1, f->number, f->file_size,
                        f->smallest, f->largest);
-    status = versions_->LogAndApply(c->edit(), &mutex_);
+    status = versions_->LogAndApply(c->edit(), &mutex_, &bg_log_cv_, &bg_log_occupied_);
     VersionSet::LevelSummaryStorage tmp;
     Log(options_.info_log, "Moved #%lld to level-%d %lld bytes %s: %s\n",
         static_cast<unsigned long long>(f->number),
@@ -891,7 +893,7 @@ Status DBImpl::InstallCompactionResults(CompactionState* compact) {
         level + 1,
         out.number, out.file_size, out.smallest, out.largest);
   }
-  return versions_->LogAndApply(compact->compaction->edit(), &mutex_);
+  return versions_->LogAndApply(compact->compaction->edit(), &mutex_, &bg_log_cv_, &bg_log_occupied_);
 }
 
 Status DBImpl::DoCompactionWork(CompactionState* compact) {
@@ -1455,7 +1457,7 @@ Status DB::Open(const Options& options, const std::string& dbname,
       impl->logfile_ = lfile;
       impl->logfile_number_ = new_log_number;
       impl->log_ = new log::Writer(lfile);
-      s = impl->versions_->LogAndApply(&edit, &impl->mutex_);
+      s = impl->versions_->LogAndApply(&edit, &impl->mutex_, &impl->bg_log_cv_, &impl->bg_log_occupied_);
     }
     if (s.ok()) {
       impl->DeleteObsoleteFiles();

@@ -742,7 +742,11 @@ void VersionSet::AppendVersion(Version* v) {
   v->next_->prev_ = v;
 }
 
-Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
+Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu, port::CondVar* cv, bool* wt) {
+  while (*wt) {
+    cv->Wait();
+  }
+  *wt = true;
   if (edit->has_log_number_) {
     assert(edit->log_number_ >= log_number_);
     assert(edit->log_number_ < next_file_number_);
@@ -782,32 +786,39 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
     }
   }
 
-  // Write new record to MANIFEST log
-  if (s.ok()) {
-    std::string record;
-    edit->EncodeTo(&record);
-    s = descriptor_log_->AddRecord(record);
+  // Unlock during expensive MANIFEST log write
+  {
+    mu->Unlock();
+
+    // Write new record to MANIFEST log
     if (s.ok()) {
-      // XXX Unlock during expensive MANIFEST log write
-      s = descriptor_file_->Sync();
-    }
-    if (!s.ok()) {
-      Log(options_->info_log, "MANIFEST write: %s\n", s.ToString().c_str());
-      if (ManifestContains(record)) {
-        Log(options_->info_log,
-            "MANIFEST contains log record despite error; advancing to new "
-            "version to prevent mismatch between in-memory and logged state");
-        s = Status::OK();
+      std::string record;
+      edit->EncodeTo(&record);
+      s = descriptor_log_->AddRecord(record);
+      if (s.ok()) {
+        // XXX Unlock during expensive MANIFEST log write
+        s = descriptor_file_->Sync();
+      }
+      if (!s.ok()) {
+        Log(options_->info_log, "MANIFEST write: %s\n", s.ToString().c_str());
+        if (ManifestContains(record)) {
+          Log(options_->info_log,
+              "MANIFEST contains log record despite error; advancing to new "
+              "version to prevent mismatch between in-memory and logged state");
+          s = Status::OK();
+        }
       }
     }
-  }
 
-  // If we just created a new descriptor file, install it by writing a
-  // new CURRENT file that points to it.
-  if (s.ok() && !new_manifest_file.empty()) {
-    s = SetCurrentFile(env_, dbname_, manifest_file_number_);
-    // No need to double-check MANIFEST in case of error since it
-    // will be discarded below.
+    // If we just created a new descriptor file, install it by writing a
+    // new CURRENT file that points to it.
+    if (s.ok() && !new_manifest_file.empty()) {
+      s = SetCurrentFile(env_, dbname_, manifest_file_number_);
+      // No need to double-check MANIFEST in case of error since it
+      // will be discarded below.
+    }
+
+    mu->Lock();
   }
 
   // Install the new version
@@ -826,6 +837,8 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
     }
   }
 
+  *wt = false;
+  cv->Signal();
   return s;
 }
 

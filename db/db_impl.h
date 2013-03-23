@@ -157,6 +157,9 @@ class DBImpl : public DB {
   port::CondVar bg_compaction_cv_;
   // Communicate with memtable->L0 background thread
   port::CondVar bg_memtable_cv_;
+  // Mutual exlusion protecting hte LogAndApply func
+  port::CondVar bg_log_cv_;
+  bool bg_log_occupied_;
 
   // Information for a manual compaction
   struct ManualCompaction {
