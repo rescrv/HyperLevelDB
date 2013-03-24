@@ -719,9 +719,6 @@ Status DBImpl::BackgroundCompaction() {
     // Nothing to do so back off
     bg_fg_cv_.SignalAll();
     bg_memtable_cv_.Signal();
-    mutex_.Unlock();
-    env_->SleepForMicroseconds(1000);
-    mutex_.Lock();
   } else if (!is_manual && c->IsTrivialMove()) {
     // Move file to next level
     assert(c->num_input_files(0) == 1);

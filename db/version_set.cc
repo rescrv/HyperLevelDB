@@ -957,6 +957,7 @@ void VersionSet::MarkFileNumberUsed(uint64_t number) {
 }
 
 void VersionSet::Finalize(Version* v) {
+  static const double scale[] = {16.0, 4.0, 1.0, 1.0, 1.0, 1.0, 1.0};
   // Precomputed best level for next compaction
   for (int level = 0; level < config::kNumLevels-1; level++) {
     double score;
@@ -979,7 +980,7 @@ void VersionSet::Finalize(Version* v) {
       const uint64_t level_bytes = TotalFileSize(v->files_[level]);
       score = static_cast<double>(level_bytes) / MaxBytesForLevel(level);
     }
-    v->compaction_scores_[level] = score;
+    v->compaction_scores_[level] = score * scale[level];
   }
 }
 
@@ -1197,53 +1198,138 @@ Iterator* VersionSet::MakeInputIterator(Compaction* c) {
   return result;
 }
 
-Compaction* VersionSet::PickCompaction(bool* levels) {
-  Compaction* c;
-  int level;
+struct CompactionBoundary {
+  size_t begin;
+  size_t end;
+  CompactionBoundary() : begin(0), end(0) {}
+  CompactionBoundary(size_t b, size_t e) : begin(b), end(e) {}
+};
 
-  // Find the best level for a compaction where there is no compaction ongoing
+struct CmpByRange {
+  CmpByRange(const Comparator* cmp) : cmp_(cmp) {}
+  bool operator () (const FileMetaData* lhs, const FileMetaData* rhs) {
+    int smallest = cmp_->Compare(lhs->smallest.user_key(), rhs->smallest.user_key());
+    if (smallest == 0) {
+      return cmp_->Compare(lhs->largest.user_key(), rhs->largest.user_key()) < 0;
+    }
+    return smallest < 0;
+  }
+  private:
+    const Comparator* cmp_;
+};
+
+Compaction* VersionSet::PickCompaction(bool* levels) {
+  // Find the level with the highest ratio of compaction scores between level
+  // and level + 1 where level's score >= 1.
   int best_level = -1;
-  double best_score = -1;
-  for (int level = 0; level + 1 < config::kNumLevels; ++level) {
-    if (levels[level] || levels[level + 1]) {
+  double best_ratio = -1;
+  for (int i = 0; i + 1 < config::kNumLevels; ++i) {
+    if (levels[i] || levels[i + 1]) {
       continue;
     }
-    if (best_score < current_->compaction_scores_[level]) {
-      best_level = level;
-      best_score = current_->compaction_scores_[level];
+    double ratio = current_->compaction_scores_[i] / current_->compaction_scores_[i + 1];
+    if (current_->compaction_scores_[i] >= 1.0 && ratio >= best_ratio) {
+      best_level = i;
+      best_ratio = ratio;
     }
   }
 
-  // We prefer compactions triggered by too much data in a level over
-  // the compactions triggered by seeks.
-  const bool size_compaction = (best_score >= 1.0);
-  const bool seek_compaction = (current_->file_to_compact_ != NULL &&
-                                !levels[current_->file_to_compact_level_]);
+  Compaction* c = NULL;
+  // If there's a level we can work with
+  if (best_level >= 0) {
+    const Comparator* user_cmp = icmp_.user_comparator();
+    std::vector<FileMetaData*> LA(current_->files_[best_level + 0]);
+    std::vector<FileMetaData*> LB(current_->files_[best_level + 1]);
+    std::sort(LA.begin(), LA.end(), CmpByRange(user_cmp));
+    std::sort(LB.begin(), LB.end(), CmpByRange(user_cmp));
+    std::vector<CompactionBoundary> boundaries(LA.size());
+    size_t begin = 0;
+    size_t end = 0;
+    size_t trivial = 0;
+    size_t trivial_idx = 0;
 
-  if (size_compaction) {
-    level = best_level;
-    assert(level >= 0);
-    assert(level+1 < config::kNumLevels);
-    c = new Compaction(level);
-
-    // Pick the first file that comes after compact_pointer_[level]
-    for (size_t i = 0; i < current_->files_[level].size(); i++) {
-      FileMetaData* f = current_->files_[level][i];
-      if (compact_pointer_[level].empty() ||
-          icmp_.Compare(f->largest.Encode(), compact_pointer_[level]) > 0) {
-        c->inputs_[0].push_back(f);
-        break;
+    // figure out which range of LB each LA points at
+    for (size_t i = 0; i < LA.size(); ++i) {
+      while (begin < LB.size() &&
+             user_cmp->Compare(LB[begin]->largest.user_key(),
+                               LA[i]->smallest.user_key()) < 0) {
+        ++begin;
+      }
+      end = std::max(begin, end);
+      while (end < LB.size() &&
+             user_cmp->Compare(LB[end]->smallest.user_key(),
+                               LA[i]->largest.user_key()) <= 0) {
+        ++end;
+      }
+      boundaries[i].begin = begin;
+      boundaries[i].end = end;
+      if (begin == end) {
+        ++trivial;
+        trivial_idx = i;
       }
     }
-    if (c->inputs_[0].empty()) {
-      // Wrap-around to the beginning of the key space
-      c->inputs_[0].push_back(current_->files_[level][0]);
+    size_t idx = 0;
+    size_t best = 0;
+    size_t best_idx = 0;
+    // find the best set of files to pull from
+    for (size_t i = 0; i < boundaries.size(); ++i) {
+      if ((boundaries[i].begin == boundaries[i].end) /* trivial move */ ||
+          (i > 0 && boundaries[i - 1].end < boundaries[i].begin)) {
+        idx = i;
+      }
+      while (idx < i && boundaries[i].end - boundaries[idx].begin > 3/*XXX MAGIC CONSTANT*/) {
+        ++idx;
+      }
+      assert(idx <= i);
+      assert(boundaries[idx].begin + 4 <= boundaries[i].end);
+      if (i - idx > best) {
+        best_idx = idx;
+        best = i - idx;
+      }
     }
-  } else if (seek_compaction) {
-    level = current_->file_to_compact_level_;
-    c = new Compaction(level);
+
+    if (best > 0) {
+      c = new Compaction(best_level);
+      for (size_t i = best_idx; i <= best + best_idx; ++i) {
+        assert(i >= 0 && i < LA.size());
+        c->inputs_[0].push_back(LA[i]);
+      }
+      for (size_t i = boundaries[best_idx].begin; i < boundaries[best_idx + best].end; ++i) {
+        assert(i >= 0 && i < LB.size());
+        c->inputs_[1].push_back(LB[i]);
+      }
+    } else if (trivial > 0) {
+      c = new Compaction(best_level);
+      c->inputs_[0].push_back(LA[trivial_idx]);
+    } else {
+      assert(best_level >= 0);
+      assert(best_level+1 < config::kNumLevels);
+      c = new Compaction(best_level);
+
+      // Pick the first file that comes after compact_pointer_[best_level]
+      for (size_t i = 0; i < current_->files_[best_level].size(); i++) {
+        FileMetaData* f = current_->files_[best_level][i];
+        if (compact_pointer_[best_level].empty() ||
+            icmp_.Compare(f->largest.Encode(), compact_pointer_[best_level]) > 0) {
+          c->inputs_[0].push_back(f);
+          break;
+        }
+      }
+      if (c->inputs_[0].empty()) {
+        // Wrap-around to the beginning of the key space
+        c->inputs_[0].push_back(current_->files_[best_level][0]);
+      }
+    }
+  }
+
+  if (!c && current_->file_to_compact_ != NULL &&
+      !levels[current_->file_to_compact_level_]) {
+    best_level = current_->file_to_compact_level_;
+    c = new Compaction(best_level);
     c->inputs_[0].push_back(current_->file_to_compact_);
-  } else {
+  }
+
+  if (!c) {
     return NULL;
   }
 
@@ -1251,7 +1337,7 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
   c->input_version_->Ref();
 
   // Files in level 0 may overlap each other, so pick up all overlapping ones
-  if (level == 0) {
+  if (best_level == 0) {
     InternalKey smallest, largest;
     GetRange(c->inputs_[0], &smallest, &largest);
     // Note that the next call will discard the file we placed in
@@ -1262,7 +1348,6 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
   }
 
   SetupOtherInputs(c);
-
   return c;
 }
 
@@ -1270,54 +1355,7 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
   const int level = c->level();
   InternalKey smallest, largest;
   GetRange(c->inputs_[0], &smallest, &largest);
-
   current_->GetOverlappingInputs(level+1, &smallest, &largest, &c->inputs_[1]);
-
-  // Get entire range covered by compaction
-  InternalKey all_start, all_limit;
-  GetRange2(c->inputs_[0], c->inputs_[1], &all_start, &all_limit);
-
-  // See if we can grow the number of inputs in "level" without
-  // changing the number of "level+1" files we pick up.
-  if (!c->inputs_[1].empty()) {
-    std::vector<FileMetaData*> expanded0;
-    current_->GetOverlappingInputs(level, &all_start, &all_limit, &expanded0);
-    const int64_t inputs0_size = TotalFileSize(c->inputs_[0]);
-    const int64_t inputs1_size = TotalFileSize(c->inputs_[1]);
-    const int64_t expanded0_size = TotalFileSize(expanded0);
-    if (expanded0.size() > c->inputs_[0].size() &&
-        inputs1_size + expanded0_size < kExpandedCompactionByteSizeLimit) {
-      InternalKey new_start, new_limit;
-      GetRange(expanded0, &new_start, &new_limit);
-      std::vector<FileMetaData*> expanded1;
-      current_->GetOverlappingInputs(level+1, &new_start, &new_limit,
-                                     &expanded1);
-      if (expanded1.size() == c->inputs_[1].size() ||
-          expanded0.size() - c->inputs_[0].size() >= expanded1.size() - c->inputs_[1].size()) {
-        Log(options_->info_log,
-            "Expanding@%d %d+%d (%ld+%ld bytes) to %d+%d (%ld+%ld bytes)\n",
-            level,
-            int(c->inputs_[0].size()),
-            int(c->inputs_[1].size()),
-            long(inputs0_size), long(inputs1_size),
-            int(expanded0.size()),
-            int(expanded1.size()),
-            long(expanded0_size), long(inputs1_size));
-        smallest = new_start;
-        largest = new_limit;
-        c->inputs_[0] = expanded0;
-        c->inputs_[1] = expanded1;
-        GetRange2(c->inputs_[0], c->inputs_[1], &all_start, &all_limit);
-      }
-    }
-  }
-
-  if (false) {
-    Log(options_->info_log, "Compacting %d '%s' .. '%s'",
-        level,
-        smallest.DebugString().c_str(),
-        largest.DebugString().c_str());
-  }
 
   // Update the place where we will do the next compaction for this level.
   // We update this immediately instead of waiting for the VersionEdit

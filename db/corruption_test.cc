@@ -331,7 +331,7 @@ TEST(CorruptionTest, CompactionInputErrorParanoid) {
   // Write must eventually fail because of corrupted table
   Status s;
   std::string tmp1, tmp2;
-  for (int i = 0; i < 10000 && s.ok(); i++) {
+  for (int i = 0; i < 1000000 && s.ok(); i++) {
     s = db_->Put(WriteOptions(), Key(i, &tmp1), Value(i, &tmp2));
   }
   ASSERT_TRUE(!s.ok()) << "write did not fail in corrupted paranoid db";
