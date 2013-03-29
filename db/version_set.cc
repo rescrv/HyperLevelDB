@@ -28,10 +28,10 @@ static const int64_t kExpandedCompactionByteSizeLimit = 25 * (2 * 1048576);
 
 static double MaxBytesForLevel(int level) {
   assert(level < leveldb::config::kNumLevels);
-  static const double bytes[] = {10 * 1048576.0,
-                                 10 * 1048576.0,
-                                 100 * 1048576.0,
-                                 1000 * 1048576.0,
+  static const double bytes[] = {0,
+                                 16 * 1048576.0,
+                                 64 * 1048576.0,
+                                 256 * 1048576.0,
                                  10000 * 1048576.0,
                                  100000 * 1048576.0,
                                  1000000 * 1048576.0};
@@ -44,9 +44,9 @@ static uint64_t MaxFileSizeForLevel(int level) {
                                    2 * 1048576,
                                    2 * 1048576,
                                    4 * 1048576,
-                                   4 * 1048576,
-                                   4 * 1048576,
-                                   4 * 1048576};
+                                   8 * 1048576,
+                                   8 * 1048576,
+                                   8 * 1048576};
   return bytes[level];
 }
 
@@ -957,7 +957,6 @@ void VersionSet::MarkFileNumberUsed(uint64_t number) {
 }
 
 void VersionSet::Finalize(Version* v) {
-  static const double scale[] = {16.0, 4.0, 1.0, 1.0, 1.0, 1.0, 1.0};
   // Precomputed best level for next compaction
   for (int level = 0; level < config::kNumLevels-1; level++) {
     double score;
@@ -980,7 +979,7 @@ void VersionSet::Finalize(Version* v) {
       const uint64_t level_bytes = TotalFileSize(v->files_[level]);
       score = static_cast<double>(level_bytes) / MaxBytesForLevel(level);
     }
-    v->compaction_scores_[level] = score * scale[level];
+    v->compaction_scores_[level] = score;
   }
 }
 
@@ -1277,7 +1276,7 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
           (i > 0 && boundaries[i - 1].end < boundaries[i].begin)) {
         idx = i;
       }
-      while (idx < i && boundaries[i].end - boundaries[idx].begin > 3/*XXX MAGIC CONSTANT*/) {
+      while (idx < i && boundaries[i].end - boundaries[idx].begin > 4/*XXX MAGIC CONSTANT*/) {
         ++idx;
       }
       assert(idx <= i);
@@ -1305,19 +1304,19 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
       assert(best_level >= 0);
       assert(best_level+1 < config::kNumLevels);
       c = new Compaction(best_level);
-
-      // Pick the first file that comes after compact_pointer_[best_level]
-      for (size_t i = 0; i < current_->files_[best_level].size(); i++) {
-        FileMetaData* f = current_->files_[best_level][i];
-        if (compact_pointer_[best_level].empty() ||
-            icmp_.Compare(f->largest.Encode(), compact_pointer_[best_level]) > 0) {
-          c->inputs_[0].push_back(f);
-          break;
+      // Pick the file that overlaps with the fewest files in the next level
+      size_t smallest = boundaries.size();
+      for (size_t i = 0; i < boundaries.size(); ++i) {
+        if (smallest == boundaries.size() ||
+            boundaries[smallest].end - boundaries[smallest].begin >
+            boundaries[i].end - boundaries[i].begin) {
+          smallest = i;
         }
       }
-      if (c->inputs_[0].empty()) {
-        // Wrap-around to the beginning of the key space
-        c->inputs_[0].push_back(current_->files_[best_level][0]);
+      assert(smallest < boundaries.size());
+      c->inputs_[0].push_back(LA[smallest]);
+      for (size_t i = boundaries[smallest].begin; i < boundaries[smallest].end; ++i) {
+        c->inputs_[1].push_back(LB[i]);
       }
     }
   }
