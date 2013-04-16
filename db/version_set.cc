@@ -392,19 +392,6 @@ Status Version::Get(const ReadOptions& options,
   return Status::NotFound(Slice());  // Use an empty error message for speed
 }
 
-bool Version::UpdateStats(const GetStats& stats) {
-  FileMetaData* f = stats.seek_file;
-  if (f != NULL) {
-    f->allowed_seeks--;
-    if (f->allowed_seeks <= 0 && file_to_compact_ == NULL) {
-      file_to_compact_ = f;
-      file_to_compact_level_ = stats.seek_file_level;
-      return true;
-    }
-  }
-  return false;
-}
-
 void Version::Ref() {
   ++refs_;
 }
@@ -1319,13 +1306,6 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
         c->inputs_[1].push_back(LB[i]);
       }
     }
-  }
-
-  if (!c && current_->file_to_compact_ != NULL &&
-      !levels[current_->file_to_compact_level_]) {
-    best_level = current_->file_to_compact_level_;
-    c = new Compaction(best_level);
-    c->inputs_[0].push_back(current_->file_to_compact_);
   }
 
   if (!c) {

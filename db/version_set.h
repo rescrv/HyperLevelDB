@@ -73,11 +73,6 @@ class Version {
   Status Get(const ReadOptions&, const LookupKey& key, std::string* val,
              GetStats* stats);
 
-  // Adds "stats" into the current state.  Returns true if a new
-  // compaction may need to be triggered, false otherwise.
-  // REQUIRES: lock is held
-  bool UpdateStats(const GetStats& stats);
-
   // Reference count management (so Versions do not disappear out from
   // under live iterators)
   void Ref();
@@ -122,19 +117,13 @@ class Version {
   // List of files per level
   std::vector<FileMetaData*> files_[config::kNumLevels];
 
-  // Next file to compact based on seek stats.
-  FileMetaData* file_to_compact_;
-  int file_to_compact_level_;
-
   // Level that should be compacted next and its compaction score.
   // Score < 1 means compaction is not strictly needed.  These fields
   // are initialized by Finalize().
   double compaction_scores_[config::kNumLevels];
 
   explicit Version(VersionSet* vset)
-      : vset_(vset), next_(this), prev_(this), refs_(0),
-        file_to_compact_(NULL),
-        file_to_compact_level_(-1) {
+      : vset_(vset), next_(this), prev_(this), refs_(0) {
     for (int i = 0; i < config::kNumLevels; ++i) {
       compaction_scores_[i] = -1;
     }
@@ -240,7 +229,7 @@ class VersionSet {
         return true;
       }
     }
-    return v->file_to_compact_ != NULL;
+    return false;
   }
 
   // Add all files listed in any live version to *live.

@@ -1116,9 +1116,6 @@ Status DBImpl::Get(const ReadOptions& options,
     mutex_.Lock();
   }
 
-  if (have_stat_update && current->UpdateStats(stats)) {
-    bg_compaction_cv_.Signal(); // doesn't affect memtable
-  }
   mem->Unref();
   if (imm != NULL) imm->Unref();
   current->Unref();
