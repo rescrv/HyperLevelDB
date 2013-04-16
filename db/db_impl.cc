@@ -708,8 +708,8 @@ Status DBImpl::BackgroundCompaction() {
     if (c) {
       assert(!levels_locked_[c->level() + 0]);
       assert(!levels_locked_[c->level() + 1]);
-      levels_locked_[c->level() + 0] = false;
-      levels_locked_[c->level() + 1] = false;
+      levels_locked_[c->level() + 0] = true;
+      levels_locked_[c->level() + 1] = true;
     }
   }
 
