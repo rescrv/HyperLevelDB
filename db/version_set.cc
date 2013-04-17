@@ -28,10 +28,10 @@ static const int64_t kExpandedCompactionByteSizeLimit = 25 * (2 * 1048576);
 
 static double MaxBytesForLevel(int level) {
   assert(level < leveldb::config::kNumLevels);
-  static const double bytes[] = {0,
-                                 16 * 1048576.0,
-                                 64 * 1048576.0,
-                                 256 * 1048576.0,
+  static const double bytes[] = {10 * 1048576.0,
+                                 10 * 1048576.0,
+                                 100 * 1048576.0,
+                                 1000 * 1048576.0,
                                  10000 * 1048576.0,
                                  100000 * 1048576.0,
                                  1000000 * 1048576.0};
@@ -43,10 +43,10 @@ static uint64_t MaxFileSizeForLevel(int level) {
   static const uint64_t bytes[] = {2 * 1048576,
                                    2 * 1048576,
                                    2 * 1048576,
-                                   4 * 1048576,
-                                   8 * 1048576,
-                                   8 * 1048576,
-                                   8 * 1048576};
+                                   2 * 1048576,
+                                   2 * 1048576,
+                                   2 * 1048576,
+                                   2 * 1048576};
   return bytes[level];
 }
 
@@ -944,8 +944,8 @@ void VersionSet::MarkFileNumberUsed(uint64_t number) {
 }
 
 void VersionSet::Finalize(Version* v) {
-  // Precomputed best level for next compaction
-  for (int level = 0; level < config::kNumLevels-1; level++) {
+  // Compute the ratio of disk usage to its limit
+  for (int level = 0; level + 1 < config::kNumLevels; ++level) {
     double score;
     if (level == 0) {
       // We treat level-0 specially by bounding the number of files
@@ -967,6 +967,12 @@ void VersionSet::Finalize(Version* v) {
       score = static_cast<double>(level_bytes) / MaxBytesForLevel(level);
     }
     v->compaction_scores_[level] = score;
+  }
+  // Compute the ratio of overages between levels
+  for (int level = 0; level + 1 < config::kNumLevels; ++level) {
+      double ratio = v->compaction_scores_[level]
+                   / std::max(1.0, v->compaction_scores_[level + 1]);
+      v->compaction_scores_[level] = ratio;
   }
 }
 
@@ -1213,10 +1219,9 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
     if (levels[i] || levels[i + 1]) {
       continue;
     }
-    double ratio = current_->compaction_scores_[i] / current_->compaction_scores_[i + 1];
-    if (current_->compaction_scores_[i] >= 1.0 && ratio >= best_ratio) {
+    if (current_->compaction_scores_[i] >= 1.0) {
       best_level = i;
-      best_ratio = ratio;
+      best_ratio = current_->compaction_scores_[i];
     }
   }
 
@@ -1234,7 +1239,7 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
     size_t trivial = 0;
     size_t trivial_idx = 0;
 
-    // figure out which range of LB each LA points at
+    // figure out which range of LB each LA covers
     for (size_t i = 0; i < LA.size(); ++i) {
       while (begin < LB.size() &&
              user_cmp->Compare(LB[begin]->largest.user_key(),
@@ -1254,6 +1259,7 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
         trivial_idx = i;
       }
     }
+
     size_t idx = 0;
     size_t best = 0;
     size_t best_idx = 0;
@@ -1284,6 +1290,7 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
         assert(i >= 0 && i < LB.size());
         c->inputs_[1].push_back(LB[i]);
       }
+Log(options_->info_log, "smart compaction %d@%d -> %d@%d\n", c->inputs_[0].size(), best_level, c->inputs_[1].size(), best_level + 1);
     } else if (trivial > 0) {
       c = new Compaction(best_level);
       c->inputs_[0].push_back(LA[trivial_idx]);
@@ -1292,6 +1299,7 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
       assert(best_level+1 < config::kNumLevels);
       c = new Compaction(best_level);
       // Pick the file that overlaps with the fewest files in the next level
+      size_t largest = boundaries.size();
       size_t smallest = boundaries.size();
       for (size_t i = 0; i < boundaries.size(); ++i) {
         if (smallest == boundaries.size() ||
@@ -1305,6 +1313,7 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
       for (size_t i = boundaries[smallest].begin; i < boundaries[smallest].end; ++i) {
         c->inputs_[1].push_back(LB[i]);
       }
+Log(options_->info_log, "stupid compaction %d@%d -> %d@%d\n", c->inputs_[0].size(), best_level, c->inputs_[1].size(), best_level + 1);
     }
   }
 

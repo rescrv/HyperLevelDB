@@ -160,8 +160,8 @@ DBImpl::~DBImpl() {
   // Wait for background work to finish
   mutex_.Lock();
   shutting_down_.Release_Store(this);  // Any non-NULL value is ok
-  bg_compaction_cv_.Signal();
-  bg_memtable_cv_.Signal();
+  bg_compaction_cv_.SignalAll();
+  bg_memtable_cv_.SignalAll();
   while (num_bg_threads_ > 0) {
     bg_fg_cv_.Wait();
   }
@@ -551,6 +551,7 @@ void DBImpl::CompactMemTableThread() {
       imm_ = NULL;
       has_imm_.Release_Store(NULL);
       bg_fg_cv_.SignalAll();
+      bg_compaction_cv_.Signal();
       DeleteObsoleteFiles();
     }
 
@@ -566,10 +567,6 @@ void DBImpl::CompactMemTableThread() {
       env_->SleepForMicroseconds(1000000);
       mutex_.Lock();
     }
-
-    bg_fg_cv_.Signal();
-    bg_memtable_cv_.Signal();
-    bg_compaction_cv_.Signal();
   }
   Log(options_.info_log, "cleaning up CompactMemTableThread");
   num_bg_threads_ -= 1;
@@ -653,7 +650,7 @@ void DBImpl::CompactLevelThread() {
   while (!shutting_down_.Acquire_Load()) {
     while (!shutting_down_.Acquire_Load() &&
            manual_compaction_ == NULL &&
-           !versions_->NeedsCompaction()) {
+           !versions_->NeedsCompaction(levels_locked_)) {
       bg_compaction_cv_.Wait();
     }
     if (shutting_down_.Acquire_Load()) {
@@ -662,23 +659,20 @@ void DBImpl::CompactLevelThread() {
     assert(manual_compaction_ == NULL || num_bg_threads_ == 2);
 
     Status s = BackgroundCompaction();
+    bg_fg_cv_.SignalAll(); // before the backoff In case a waiter 
+                           // can proceed despite the error
 
     if (!shutting_down_.Acquire_Load() && !s.ok()) {
       // Wait a little bit before retrying background compaction in
       // case this is an environmental problem and we do not want to
       // chew up resources for failed compactions for the duration of
       // the problem.
-      bg_fg_cv_.SignalAll();  // In case a waiter can proceed despite the error
       Log(options_.info_log, "Waiting after background compaction error: %s",
           s.ToString().c_str());
       mutex_.Unlock();
       env_->SleepForMicroseconds(1000000);
       mutex_.Lock();
     }
-
-    bg_fg_cv_.Signal();
-    bg_memtable_cv_.Signal();
-    // we'll do our own compaction work on the next go-round
   }
   Log(options_.info_log, "cleaning up CompactLevelThread");
   num_bg_threads_ -= 1;
@@ -716,9 +710,7 @@ Status DBImpl::BackgroundCompaction() {
   Status status;
 
   if (c == NULL) {
-    // Nothing to do so back off
-    bg_fg_cv_.SignalAll();
-    bg_memtable_cv_.Signal();
+    // Nothing to do
   } else if (!is_manual && c->IsTrivialMove()) {
     // Move file to next level
     assert(c->num_input_files(0) == 1);

@@ -222,10 +222,11 @@ class VersionSet {
   Iterator* MakeInputIterator(Compaction* c);
 
   // Returns true iff some level needs a compaction.
-  bool NeedsCompaction() const {
+  bool NeedsCompaction(bool* levels) const {
     Version* v = current_;
-    for (int i = 0; i < config::kNumLevels; ++i) {
-      if (v->compaction_scores_[i] >= 1.0) {
+    for (int i = 0; i + 1 < config::kNumLevels; ++i) {
+      if (!levels[i] && !levels[i + 1] &&
+          v->compaction_scores_[i] >= 1.0) {
         return true;
       }
     }
