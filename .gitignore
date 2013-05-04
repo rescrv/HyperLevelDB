@@ -1,8 +1,30 @@
-build_config.mk
-*.a
+# wildcards
+.deps
+.dirstamp
+*.la
+.libs
+*.lo
 *.o
-*.dylib*
-*.so
-*.so.*
 *_test
+# specific files
+aclocal.m4
+autom4te.cache/
+config.guess
+config.h
+config.h.in
+config.log
+config.status
+config.sub
+configure
 db_bench
+depcomp
+install-sh
+leveldbutil
+libtool
+ltmain.sh
+m4/
+Makefile
+Makefile.in
+Makefile.old
+missing
+stamp-h1

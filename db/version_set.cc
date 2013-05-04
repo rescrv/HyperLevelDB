@@ -1273,7 +1273,6 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
         ++idx;
       }
       assert(idx <= i);
-      assert(boundaries[idx].begin + 4 <= boundaries[i].end);
       if (i - idx > best) {
         best_idx = idx;
         best = i - idx;
