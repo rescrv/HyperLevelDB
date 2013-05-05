@@ -21,11 +21,6 @@
 
 namespace leveldb {
 
-// Maximum number of bytes in all compacted files.  We avoid expanding
-// the lower level file set of a compaction if it would make the
-// total compaction cover more than this many bytes.
-static const int64_t kExpandedCompactionByteSizeLimit = 25 * (2 * 1048576);
-
 static double MaxBytesForLevel(int level) {
   assert(level < leveldb::config::kNumLevels);
   static const double bytes[] = {10 * 1048576.0,
@@ -42,11 +37,11 @@ static uint64_t MaxFileSizeForLevel(int level) {
   assert(level < leveldb::config::kNumLevels);
   static const uint64_t bytes[] = {2 * 1048576,
                                    2 * 1048576,
-                                   2 * 1048576,
-                                   2 * 1048576,
-                                   2 * 1048576,
-                                   2 * 1048576,
-                                   2 * 1048576};
+                                   4 * 1048576,
+                                   8 * 1048576,
+                                   16 * 1048576,
+                                   16 * 1048576,
+                                   16 * 1048576};
   return bytes[level];
 }
 
@@ -968,12 +963,6 @@ void VersionSet::Finalize(Version* v) {
     }
     v->compaction_scores_[level] = score;
   }
-  // Compute the ratio of overages between levels
-  for (int level = 0; level + 1 < config::kNumLevels; ++level) {
-      double ratio = v->compaction_scores_[level]
-                   / std::max(1.0, v->compaction_scores_[level + 1]);
-      v->compaction_scores_[level] = ratio;
-  }
 }
 
 Status VersionSet::WriteSnapshot(log::Writer* log) {
@@ -1191,10 +1180,10 @@ Iterator* VersionSet::MakeInputIterator(Compaction* c) {
 }
 
 struct CompactionBoundary {
-  size_t begin;
-  size_t end;
-  CompactionBoundary() : begin(0), end(0) {}
-  CompactionBoundary(size_t b, size_t e) : begin(b), end(e) {}
+  size_t start;
+  size_t limit;
+  CompactionBoundary() : start(0), limit(0) {}
+  CompactionBoundary(size_t s, size_t l) : start(s), limit(l) {}
 };
 
 struct CmpByRange {
@@ -1214,14 +1203,13 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
   // Find the level with the highest ratio of compaction scores between level
   // and level + 1 where level's score >= 1.
   int best_level = -1;
-  double best_ratio = -1;
-  for (int i = 0; i + 1 < config::kNumLevels; ++i) {
+  for (int i = config::kNumLevels - 1; i >= 0; --i) {
     if (levels[i] || levels[i + 1]) {
       continue;
     }
     if (current_->compaction_scores_[i] >= 1.0) {
       best_level = i;
-      best_ratio = current_->compaction_scores_[i];
+      break;
     }
   }
 
@@ -1233,64 +1221,87 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
     std::vector<FileMetaData*> LB(current_->files_[best_level + 1]);
     std::sort(LA.begin(), LA.end(), CmpByRange(user_cmp));
     std::sort(LB.begin(), LB.end(), CmpByRange(user_cmp));
-    std::vector<CompactionBoundary> boundaries(LA.size());
-    size_t begin = 0;
-    size_t end = 0;
-    size_t trivial = 0;
-    size_t trivial_idx = 0;
+    std::vector<uint64_t> LA_sizes(LA.size() + 1, 0);
+    std::vector<uint64_t> LB_sizes(LB.size() + 1, 0);
 
+    // compute sizes
+    for (size_t i = 0; i < LA.size(); ++i) {
+        LA_sizes[i + 1] = LA_sizes[i] + LA[i]->file_size;
+    }
+    for (size_t i = 0; i < LB.size(); ++i) {
+        LB_sizes[i + 1] = LB_sizes[i] + LB[i]->file_size;
+    }
+
+    // compute boundaries
+    std::vector<CompactionBoundary> boundaries(LA.size());
+    size_t start = 0;
+    size_t limit = 0;
     // figure out which range of LB each LA covers
     for (size_t i = 0; i < LA.size(); ++i) {
-      while (begin < LB.size() &&
-             user_cmp->Compare(LB[begin]->largest.user_key(),
+      // find smallest start s.t. LB[start] overlaps LA[i]
+      while (start < LB.size() &&
+             user_cmp->Compare(LB[start]->largest.user_key(),
                                LA[i]->smallest.user_key()) < 0) {
-        ++begin;
+        ++start;
       }
-      end = std::max(begin, end);
-      while (end < LB.size() &&
-             user_cmp->Compare(LB[end]->smallest.user_key(),
+      limit = std::max(start, limit);
+      // find smallest limit >= start s.t. LB[limit] does not overlap LA[i]
+      while (limit < LB.size() &&
+             user_cmp->Compare(LB[limit]->smallest.user_key(),
                                LA[i]->largest.user_key()) <= 0) {
-        ++end;
+        ++limit;
       }
-      boundaries[i].begin = begin;
-      boundaries[i].end = end;
-      if (begin == end) {
-        ++trivial;
-        trivial_idx = i;
-      }
+      boundaries[i].start = start;
+      boundaries[i].limit = limit;
     }
 
-    size_t idx = 0;
-    size_t best = 0;
-    size_t best_idx = 0;
-    // find the best set of files to pull from
+    // find the best set of files: maximize the ratio of sizeof(LA)/sizeof(LB)
+    // while keeping sizeof(LA)+sizeof(LB) < some threshold.  If there's a tie
+    // for ratio, minimize size.
+    size_t best_idx_start = 0;
+    size_t best_idx_limit = 0;
+    uint64_t best_size = 0;
+    double best_ratio = -1;
+    ssize_t trivial_idx = -1;
     for (size_t i = 0; i < boundaries.size(); ++i) {
-      if ((boundaries[i].begin == boundaries[i].end) /* trivial move */ ||
-          (i > 0 && boundaries[i - 1].end < boundaries[i].begin)) {
-        idx = i;
-      }
-      while (idx < i && boundaries[i].end - boundaries[idx].begin > 4/*XXX MAGIC CONSTANT*/) {
-        ++idx;
-      }
-      assert(idx <= i);
-      if (i - idx > best) {
-        best_idx = idx;
-        best = i - idx;
+      for (size_t j = i; j < boundaries.size(); ++j) {
+        uint64_t sz_a = LA_sizes[j + 1] - LA_sizes[i];
+        uint64_t sz_b = LB_sizes[boundaries[j].limit] - LB_sizes[boundaries[i].start];
+        if (boundaries[j].start == boundaries[j].limit) {
+          trivial_idx = j;
+          break;
+        }
+        if (sz_a + sz_b >= 64 * 1048576/*XXX MAGIC CONSTANT*/) {
+          break;
+        }
+        assert(sz_b > 0); // true because we exclude trivial moves
+        double ratio = double(sz_a) / double(sz_b);
+        if (ratio > best_ratio ||
+            (ratio == best_ratio && sz_a + sz_b < best_size)) {
+          best_ratio = ratio;
+          best_size = sz_a + sz_b;
+          best_idx_start = i;
+          best_idx_limit = j + 1;
+        }
       }
     }
 
-    if (best > 0) {
+    // setup the data
+    if (best_ratio < 1.0 && trivial_idx >= 0) {
       c = new Compaction(best_level);
-      for (size_t i = best_idx; i <= best + best_idx; ++i) {
+      c->inputs_[0].push_back(LA[trivial_idx]);
+    } else if (best_ratio >= 0.0) {
+      c = new Compaction(best_level);
+      for (size_t i = best_idx_start; i < best_idx_limit; ++i) {
         assert(i >= 0 && i < LA.size());
         c->inputs_[0].push_back(LA[i]);
       }
-      for (size_t i = boundaries[best_idx].begin; i < boundaries[best_idx + best].end; ++i) {
+      for (size_t i = boundaries[best_idx_start].start;
+          i < boundaries[best_idx_limit - 1].limit; ++i) {
         assert(i >= 0 && i < LB.size());
         c->inputs_[1].push_back(LB[i]);
       }
-Log(options_->info_log, "smart compaction %d@%d -> %d@%d\n", c->inputs_[0].size(), best_level, c->inputs_[1].size(), best_level + 1);
-    } else if (trivial > 0) {
+    } else if (trivial_idx >= 0) {
       c = new Compaction(best_level);
       c->inputs_[0].push_back(LA[trivial_idx]);
     } else {
@@ -1302,17 +1313,16 @@ Log(options_->info_log, "smart compaction %d@%d -> %d@%d\n", c->inputs_[0].size(
       size_t smallest = boundaries.size();
       for (size_t i = 0; i < boundaries.size(); ++i) {
         if (smallest == boundaries.size() ||
-            boundaries[smallest].end - boundaries[smallest].begin >
-            boundaries[i].end - boundaries[i].begin) {
+            boundaries[smallest].limit - boundaries[smallest].start >
+            boundaries[i].limit - boundaries[i].start) {
           smallest = i;
         }
       }
       assert(smallest < boundaries.size());
       c->inputs_[0].push_back(LA[smallest]);
-      for (size_t i = boundaries[smallest].begin; i < boundaries[smallest].end; ++i) {
+      for (size_t i = boundaries[smallest].start; i < boundaries[smallest].limit; ++i) {
         c->inputs_[1].push_back(LB[i]);
       }
-Log(options_->info_log, "stupid compaction %d@%d -> %d@%d\n", c->inputs_[0].size(), best_level, c->inputs_[1].size(), best_level + 1);
     }
   }
 
