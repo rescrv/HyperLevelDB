@@ -37,11 +37,11 @@ static uint64_t MaxFileSizeForLevel(int level) {
   assert(level < leveldb::config::kNumLevels);
   static const uint64_t bytes[] = {2 * 1048576,
                                    2 * 1048576,
-                                   4 * 1048576,
-                                   8 * 1048576,
-                                   16 * 1048576,
-                                   16 * 1048576,
-                                   16 * 1048576};
+                                   2 * 1048576,
+                                   2 * 1048576,
+                                   2 * 1048576,
+                                   2 * 1048576,
+                                   2 * 1048576};
   return bytes[level];
 }
 
