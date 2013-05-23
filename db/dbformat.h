@@ -6,11 +6,11 @@
 #define STORAGE_LEVELDB_DB_FORMAT_H_
 
 #include <stdio.h>
-#include "leveldb/comparator.h"
-#include "leveldb/db.h"
-#include "leveldb/filter_policy.h"
-#include "leveldb/slice.h"
-#include "leveldb/table_builder.h"
+#include "hyperleveldb/comparator.h"
+#include "hyperleveldb/db.h"
+#include "hyperleveldb/filter_policy.h"
+#include "hyperleveldb/slice.h"
+#include "hyperleveldb/table_builder.h"
 #include "util/coding.h"
 #include "util/logging.h"
 

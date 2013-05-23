@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <sys/time.h>
 #include <time.h>
-#include "leveldb/env.h"
+#include "hyperleveldb/env.h"
 
 namespace leveldb {
 

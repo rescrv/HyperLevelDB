@@ -30,12 +30,12 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.62])
-AC_INIT([leveldb], [2.0.dev], [robert@hyperdex.org])
+AC_INIT([hyperleveldb], [2.0.dev], [robert@hyperdex.org])
 AM_INIT_AUTOMAKE([foreign subdir-objects dist-bzip2])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 LT_PREREQ([2.2])
 LT_INIT
-AC_CONFIG_SRCDIR([include/leveldb/db.h])
+AC_CONFIG_SRCDIR([hyperleveldb/db.h])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR([m4])
 

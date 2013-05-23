@@ -10,8 +10,8 @@
 #include "db/dbformat.h"
 #include "db/log_writer.h"
 #include "db/snapshot.h"
-#include "leveldb/db.h"
-#include "leveldb/env.h"
+#include "hyperleveldb/db.h"
+#include "hyperleveldb/env.h"
 #include "port/port.h"
 #include "port/thread_annotations.h"
 

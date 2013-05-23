@@ -34,9 +34,9 @@
 #include "db/table_cache.h"
 #include "db/version_edit.h"
 #include "db/write_batch_internal.h"
-#include "leveldb/comparator.h"
-#include "leveldb/db.h"
-#include "leveldb/env.h"
+#include "hyperleveldb/comparator.h"
+#include "hyperleveldb/db.h"
+#include "hyperleveldb/env.h"
 
 namespace leveldb {
 

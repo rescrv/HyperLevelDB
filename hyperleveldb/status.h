@@ -14,7 +14,7 @@
 #define STORAGE_LEVELDB_INCLUDE_STATUS_H_
 
 #include <string>
-#include "leveldb/slice.h"
+#include "hyperleveldb/slice.h"
 
 namespace leveldb {
 

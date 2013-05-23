@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
-#include "leveldb/table.h"
+#include "hyperleveldb/table.h"
 
-#include "leveldb/cache.h"
-#include "leveldb/comparator.h"
-#include "leveldb/env.h"
-#include "leveldb/filter_policy.h"
-#include "leveldb/options.h"
+#include "hyperleveldb/cache.h"
+#include "hyperleveldb/comparator.h"
+#include "hyperleveldb/env.h"
+#include "hyperleveldb/filter_policy.h"
+#include "hyperleveldb/options.h"
 #include "table/block.h"
 #include "table/filter_block.h"
 #include "table/format.h"

@@ -6,8 +6,8 @@
 
 #include "db/filename.h"
 #include "db/dbformat.h"
-#include "leveldb/env.h"
-#include "leveldb/iterator.h"
+#include "hyperleveldb/env.h"
+#include "hyperleveldb/iterator.h"
 #include "port/port.h"
 #include "util/logging.h"
 #include "util/mutexlock.h"
