@@ -26,9 +26,8 @@
 ## POSSIBILITY OF SUCH DAMAGE.
 
 ACLOCAL_AMFLAGS = -I m4 ${ACLOCAL_FLAGS}
-# XXX -fno-builtin-memcmp 
-AM_CFLAGS = -I$(abs_top_srcdir)/include -DLEVELDB_PLATFORM_POSIX
-AM_CXXFLAGS = -I$(abs_top_srcdir)/include -DLEVELDB_PLATFORM_POSIX
+AM_CFLAGS = -I$(abs_top_srcdir)/include -DLEVELDB_PLATFORM_POSIX -fno-builtin-memcmp -fno-builtin-memmove
+AM_CXXFLAGS = -I$(abs_top_srcdir)/include -DLEVELDB_PLATFORM_POSIX -fno-builtin-memcmp -fno-builtin-memmove
 AM_MAKEFLAGS = --no-print-directory
 
 EXTRA_DIST =
