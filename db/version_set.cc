@@ -1207,7 +1207,8 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
     if (levels[i] || levels[i + 1]) {
       continue;
     }
-    if (current_->compaction_scores_[i] >= 1.0) {
+    if (current_->compaction_scores_[i] >= 1.0 &&
+        current_->compaction_scores_[i + 1] < 1.0) {
       best_level = i;
       break;
     }

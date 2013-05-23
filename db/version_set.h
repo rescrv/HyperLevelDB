@@ -226,7 +226,9 @@ class VersionSet {
     Version* v = current_;
     for (int i = 0; i + 1 < config::kNumLevels; ++i) {
       if (!levels[i] && !levels[i + 1] &&
-          v->compaction_scores_[i] >= 1.0) {
+          v->compaction_scores_[i] >= 1.0 &&
+          (i + 2 == config::kNumLevels ||
+           v->compaction_scores_[i + 1] < 1.0)) {
         return true;
       }
     }
