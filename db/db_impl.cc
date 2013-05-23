@@ -142,9 +142,7 @@ DBImpl::DBImpl(const Options& options, const std::string& dbname)
   // For now, only two threads are safe.
   env_->StartThread(&DBImpl::CompactMemTableWrapper, this);
   env_->StartThread(&DBImpl::CompactLevelWrapper, this);
-  env_->StartThread(&DBImpl::CompactLevelWrapper, this);
   num_bg_threads_ = 2;
-  num_bg_threads_ = 3;
 
   // Reserve ten files or so for other uses and give the rest to TableCache.
   const int table_cache_size = options.max_open_files - 10;
@@ -502,7 +500,6 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
         --level;
       }
     }
-    level = 0;
     edit->AddFile(level, meta.number, meta.file_size,
                   meta.smallest, meta.largest);
   }
