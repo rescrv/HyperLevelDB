@@ -28,6 +28,7 @@ namespace leveldb {
 namespace log { class Writer; }
 
 class Compaction;
+class CompactionBoundary;
 class Iterator;
 class MemTable;
 class TableBuilder;
@@ -266,6 +267,13 @@ class VersionSet {
                  const std::vector<FileMetaData*>& inputs2,
                  InternalKey* smallest,
                  InternalKey* largest);
+
+  void GetCompactionBoundaries(int level,
+                               std::vector<FileMetaData*>* LA,
+                               std::vector<FileMetaData*>* LB,
+                               std::vector<uint64_t>* LA_sizes,
+                               std::vector<uint64_t>* LB_sizes,
+                               std::vector<class CompactionBoundary>* boundaries);
 
   void SetupOtherInputs(Compaction* c);
 

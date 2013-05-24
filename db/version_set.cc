@@ -1199,6 +1199,54 @@ struct CmpByRange {
     const Comparator* cmp_;
 };
 
+// Stores the compaction boundaries between level and level + 1
+void VersionSet::GetCompactionBoundaries(int level,
+                                         std::vector<FileMetaData*>* LA,
+                                         std::vector<FileMetaData*>* LB,
+                                         std::vector<uint64_t>* LA_sizes,
+                                         std::vector<uint64_t>* LB_sizes,
+                                         std::vector<CompactionBoundary>* boundaries)
+{
+  const Comparator* user_cmp = icmp_.user_comparator();
+  *LA = current_->files_[level + 0];
+  *LB = current_->files_[level + 1];
+  *LA_sizes = std::vector<uint64_t>(LA->size() + 1, 0);
+  *LB_sizes = std::vector<uint64_t>(LB->size() + 1, 0);
+  std::sort(LA->begin(), LA->end(), CmpByRange(user_cmp));
+  std::sort(LB->begin(), LB->end(), CmpByRange(user_cmp));
+  boundaries->resize(LA->size());
+
+  // compute sizes
+  for (size_t i = 0; i < LA->size(); ++i) {
+      (*LA_sizes)[i + 1] = (*LA_sizes)[i] + (*LA)[i]->file_size;
+  }
+  for (size_t i = 0; i < LB->size(); ++i) {
+      (*LB_sizes)[i + 1] = (*LB_sizes)[i] + (*LB)[i]->file_size;
+  }
+
+  // compute boundaries
+  size_t start = 0;
+  size_t limit = 0;
+  // figure out which range of LB each LA covers
+  for (size_t i = 0; i < LA->size(); ++i) {
+    // find smallest start s.t. LB[start] overlaps LA[i]
+    while (start < LB->size() &&
+           user_cmp->Compare((*LB)[start]->largest.user_key(),
+                             (*LA)[i]->smallest.user_key()) < 0) {
+      ++start;
+    }
+    limit = std::max(start, limit);
+    // find smallest limit >= start s.t. LB[limit] does not overlap LA[i]
+    while (limit < LB->size() &&
+           user_cmp->Compare((*LB)[limit]->smallest.user_key(),
+                             (*LA)[i]->largest.user_key()) <= 0) {
+      ++limit;
+    }
+    (*boundaries)[i].start = start;
+    (*boundaries)[i].limit = limit;
+  }
+}
+
 Compaction* VersionSet::PickCompaction(bool* levels) {
   // Find the level with the highest ratio of compaction scores between level
   // and level + 1 where level's score >= 1.
@@ -1217,44 +1265,12 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
   Compaction* c = NULL;
   // If there's a level we can work with
   if (best_level >= 0) {
-    const Comparator* user_cmp = icmp_.user_comparator();
-    std::vector<FileMetaData*> LA(current_->files_[best_level + 0]);
-    std::vector<FileMetaData*> LB(current_->files_[best_level + 1]);
-    std::sort(LA.begin(), LA.end(), CmpByRange(user_cmp));
-    std::sort(LB.begin(), LB.end(), CmpByRange(user_cmp));
-    std::vector<uint64_t> LA_sizes(LA.size() + 1, 0);
-    std::vector<uint64_t> LB_sizes(LB.size() + 1, 0);
-
-    // compute sizes
-    for (size_t i = 0; i < LA.size(); ++i) {
-        LA_sizes[i + 1] = LA_sizes[i] + LA[i]->file_size;
-    }
-    for (size_t i = 0; i < LB.size(); ++i) {
-        LB_sizes[i + 1] = LB_sizes[i] + LB[i]->file_size;
-    }
-
-    // compute boundaries
-    std::vector<CompactionBoundary> boundaries(LA.size());
-    size_t start = 0;
-    size_t limit = 0;
-    // figure out which range of LB each LA covers
-    for (size_t i = 0; i < LA.size(); ++i) {
-      // find smallest start s.t. LB[start] overlaps LA[i]
-      while (start < LB.size() &&
-             user_cmp->Compare(LB[start]->largest.user_key(),
-                               LA[i]->smallest.user_key()) < 0) {
-        ++start;
-      }
-      limit = std::max(start, limit);
-      // find smallest limit >= start s.t. LB[limit] does not overlap LA[i]
-      while (limit < LB.size() &&
-             user_cmp->Compare(LB[limit]->smallest.user_key(),
-                               LA[i]->largest.user_key()) <= 0) {
-        ++limit;
-      }
-      boundaries[i].start = start;
-      boundaries[i].limit = limit;
-    }
+    std::vector<FileMetaData*> LA;
+    std::vector<FileMetaData*> LB;
+    std::vector<uint64_t> LA_sizes;
+    std::vector<uint64_t> LB_sizes;
+    std::vector<CompactionBoundary> boundaries;
+    GetCompactionBoundaries(best_level, &LA, &LB, &LA_sizes, &LB_sizes, &boundaries);
 
     // find the best set of files: maximize the ratio of sizeof(LA)/sizeof(LB)
     // while keeping sizeof(LA)+sizeof(LB) < some threshold.  If there's a tie
