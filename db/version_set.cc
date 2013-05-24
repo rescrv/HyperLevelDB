@@ -45,6 +45,18 @@ static uint64_t MaxFileSizeForLevel(int level) {
   return bytes[level];
 }
 
+static uint64_t MaxCompactionBytesForLevel(int level) {
+  assert(level < leveldb::config::kNumLevels);
+  static const uint64_t bytes[] = {64 * 1048576,
+                                   64 * 1048576,
+                                   64 * 1048576,
+                                   64 * 1048576,
+                                   128 * 1048576,
+                                   256 * 1048576,
+                                   512 * 1048576};
+  return bytes[level];
+}
+
 static int64_t TotalFileSize(const std::vector<FileMetaData*>& files) {
   int64_t sum = 0;
   for (size_t i = 0; i < files.size(); i++) {
@@ -1288,7 +1300,7 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
           trivial_idx = j;
           break;
         }
-        if (sz_a + sz_b >= 64 * 1048576/*XXX MAGIC CONSTANT*/) {
+        if (sz_a + sz_b >= MaxCompactionBytesForLevel(best_level)) {
           break;
         }
         assert(sz_b > 0); // true because we exclude trivial moves
