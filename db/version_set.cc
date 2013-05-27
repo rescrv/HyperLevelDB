@@ -1315,10 +1315,19 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
       }
     }
 
-    // setup the data
-    if (best_ratio < 1.0 && trivial_idx >= 0) {
+    // Trivial moves have a near-0 cost, so do them first.
+    if (trivial_idx >= 0) {
       c = new Compaction(best_level);
       c->inputs_[0].push_back(LA[trivial_idx]);
+    // If the best we could do would be wasteful and the best level has more
+    // data in it than the next level would have, move it all
+    } else if (best_ratio >= 0.0 &&
+               LA_sizes.back() * best_ratio >= LB_sizes.back()) {
+      c = new Compaction(best_level);
+      for (size_t i = 0 ; i < LA.size(); ++i) {
+        c->inputs_[0].push_back(LA[i]);
+      }
+    // otherwise go with the best ratio
     } else if (best_ratio >= 0.0) {
       c = new Compaction(best_level);
       for (size_t i = best_idx_start; i < best_idx_limit; ++i) {
@@ -1330,9 +1339,7 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
         assert(i >= 0 && i < LB.size());
         c->inputs_[1].push_back(LB[i]);
       }
-    } else if (trivial_idx >= 0) {
-      c = new Compaction(best_level);
-      c->inputs_[0].push_back(LA[trivial_idx]);
+    // otherwise just pick the file with least overlap
     } else {
       assert(best_level >= 0);
       assert(best_level+1 < config::kNumLevels);
