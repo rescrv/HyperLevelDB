@@ -713,19 +713,23 @@ Status DBImpl::BackgroundCompaction() {
     // Nothing to do
   } else if (!is_manual && c->IsTrivialMove() && c->level() > 0) {
     // Move file to next level
-    assert(c->num_input_files(0) == 1);
-    FileMetaData* f = c->input(0, 0);
-    c->edit()->DeleteFile(c->level(), f->number);
-    c->edit()->AddFile(c->level() + 1, f->number, f->file_size,
-                       f->smallest, f->largest);
+    for (size_t i = 0; i < c->num_input_files(0); ++i) {
+      FileMetaData* f = c->input(0, i);
+      c->edit()->DeleteFile(c->level(), f->number);
+      c->edit()->AddFile(c->level() + 1, f->number, f->file_size,
+                         f->smallest, f->largest);
+    }
     status = versions_->LogAndApply(c->edit(), &mutex_, &bg_log_cv_, &bg_log_occupied_);
     VersionSet::LevelSummaryStorage tmp;
-    Log(options_.info_log, "Moved #%lld to level-%d %lld bytes %s: %s\n",
-        static_cast<unsigned long long>(f->number),
-        c->level() + 1,
-        static_cast<unsigned long long>(f->file_size),
-        status.ToString().c_str(),
-        versions_->LevelSummary(&tmp));
+    for (size_t i = 0; i < c->num_input_files(0); ++i) {
+      FileMetaData* f = c->input(0, i);
+      Log(options_.info_log, "Moved #%lld to level-%d %lld bytes %s: %s\n",
+          static_cast<unsigned long long>(f->number),
+          c->level() + 1,
+          static_cast<unsigned long long>(f->file_size),
+          status.ToString().c_str(),
+          versions_->LevelSummary(&tmp));
+    }
   } else {
     CompactionState* compact = new CompactionState(c);
     status = DoCompactionWork(compact);

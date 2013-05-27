@@ -1274,6 +1274,7 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
     }
   }
 
+  bool trivial = false;
   Compaction* c = NULL;
   // If there's a level we can work with
   if (best_level >= 0) {
@@ -1291,13 +1292,12 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
     size_t best_idx_limit = 0;
     uint64_t best_size = 0;
     double best_ratio = -1;
-    ssize_t trivial_idx = -1;
     for (size_t i = 0; i < boundaries.size(); ++i) {
       for (size_t j = i; j < boundaries.size(); ++j) {
         uint64_t sz_a = LA_sizes[j + 1] - LA_sizes[i];
         uint64_t sz_b = LB_sizes[boundaries[j].limit] - LB_sizes[boundaries[i].start];
         if (boundaries[j].start == boundaries[j].limit) {
-          trivial_idx = j;
+          trivial = true;
           break;
         }
         if (sz_a + sz_b >= MaxCompactionBytesForLevel(best_level)) {
@@ -1316,9 +1316,14 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
     }
 
     // Trivial moves have a near-0 cost, so do them first.
-    if (trivial_idx >= 0) {
+    if (trivial) {
       c = new Compaction(best_level);
-      c->inputs_[0].push_back(LA[trivial_idx]);
+      for (size_t i = 0; i < LA.size(); ++i) {
+        if (boundaries[i].start == boundaries[i].limit) {
+          c->inputs_[0].push_back(LA[i]);
+        }
+      }
+      trivial = best_level != 0;
     // If the best we could do would be wasteful and the best level has more
     // data in it than the next level would have, move it all
     } else if (best_ratio >= 0.0 &&
@@ -1380,7 +1385,9 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
     assert(!c->inputs_[0].empty());
   }
 
-  SetupOtherInputs(c);
+  if (!trivial) {
+    SetupOtherInputs(c);
+  }
   return c;
 }
 
@@ -1444,8 +1451,7 @@ Compaction::~Compaction() {
 }
 
 bool Compaction::IsTrivialMove() const {
-  return (num_input_files(0) == 1 &&
-          num_input_files(1) == 0);
+  return num_input_files(1) == 0;
 }
 
 void Compaction::AddInputDeletions(VersionEdit* edit) {
