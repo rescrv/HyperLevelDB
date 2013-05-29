@@ -145,6 +145,7 @@ noinst_PROGRAMS += db_bench
 noinst_PROGRAMS += leveldbutil
 
 EXTRA_PROGRAMS =
+EXTRA_PROGRAMS += benchmark
 EXTRA_PROGRAMS += db_bench_sqlite3
 EXTRA_PROGRAMS += db_bench_tree_db
 
@@ -169,6 +170,10 @@ check_PROGRAMS += version_set_test
 check_PROGRAMS += write_batch_test
 
 TESTS = $(check_PROGRAMS)
+
+benchmark_SOURCES = benchmark.cc
+benchmark_LDADD = libhyperleveldb.la -lpthread -le -lpopt -larmnod
+benchmark_LDFLAGS = -no-install
 
 db_bench_SOURCES = db/db_bench.cc $(TESTUTIL)
 db_bench_LDADD = libhyperleveldb.la -lpthread
