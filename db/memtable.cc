@@ -8,6 +8,7 @@
 #include "hyperleveldb/env.h"
 #include "hyperleveldb/iterator.h"
 #include "util/coding.h"
+#include "util/mutexlock.h"
 
 namespace leveldb {
 
@@ -28,7 +29,10 @@ MemTable::~MemTable() {
   assert(refs_ == 0);
 }
 
-size_t MemTable::ApproximateMemoryUsage() { return arena_.MemoryUsage(); }
+size_t MemTable::ApproximateMemoryUsage() {
+  MutexLock l(&mtx_);
+  return arena_.MemoryUsage();
+}
 
 int MemTable::KeyComparator::operator()(const char* aptr, const char* bptr)
     const {
@@ -93,7 +97,13 @@ void MemTable::Add(SequenceNumber s, ValueType type,
   const size_t encoded_len =
       VarintLength(internal_key_size) + internal_key_size +
       VarintLength(val_size) + val_size;
-  char* buf = arena_.Allocate(encoded_len);
+  char* buf = NULL;
+
+  {
+    MutexLock l(&mtx_);
+    buf = arena_.Allocate(encoded_len);
+  }
+
   char* p = EncodeVarint32(buf, internal_key_size);
   memcpy(p, key.data(), key_size);
   p += key_size;
@@ -102,7 +112,12 @@ void MemTable::Add(SequenceNumber s, ValueType type,
   p = EncodeVarint32(p, val_size);
   memcpy(p, value.data(), val_size);
   assert((p + val_size) - buf == encoded_len);
-  table_.Insert(buf);
+  Table::InsertHint ih(&table_, buf);
+
+  {
+    MutexLock l(&mtx_);
+    table_.InsertWithHint(&ih, buf);
+  }
 }
 
 bool MemTable::Get(const LookupKey& key, std::string* value, Status* s) {

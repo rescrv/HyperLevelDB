@@ -78,6 +78,7 @@ class MemTable {
 
   KeyComparator comparator_;
   int refs_;
+  port::Mutex mtx_;
   Arena arena_;
   Table table_;
 
