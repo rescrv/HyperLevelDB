@@ -1291,10 +1291,14 @@ Status DBImpl::MakeRoomForWrite(bool force) {
     } else if (imm_ != NULL) {
       // We have filled up the current memtable, but the previous
       // one is still being compacted, so we wait.
+      bg_compaction_cv_.Signal();
+      bg_memtable_cv_.Signal();
       bg_fg_cv_.Wait();
     } else if (versions_->NumLevelFiles(0) >= config::kL0_StopWritesTrigger) {
       // There are too many level-0 files.
       Log(options_.info_log, "waiting...\n");
+      bg_compaction_cv_.Signal();
+      bg_memtable_cv_.Signal();
       bg_fg_cv_.Wait();
     } else {
       // Attempt to switch to a new memtable and trigger compaction of old
