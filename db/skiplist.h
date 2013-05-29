@@ -38,6 +38,7 @@ template<typename Key, class Comparator>
 class SkipList {
  private:
   struct Node;
+  enum { kMaxHeight = 12 };
 
  public:
   // Create a new SkipList object that will use "cmp" for comparing keys,
@@ -47,10 +48,36 @@ class SkipList {
 
   // Insert key into the list.
   // REQUIRES: nothing that compares equal to key is currently in the list.
+  // REQUIRES: external synchronization.
   void Insert(const Key& key);
+
+  // Insert key into the list using the iterator as a hint.
+  // REQUIRES: nothing that compares equal to key is currently in the list.
+  // REQUIRES: external synchronization.
+  class InsertHint;
+  void InsertWithHint(InsertHint* ih, const Key& key);
 
   // Returns true iff an entry that compares equal to key is in the list.
   bool Contains(const Key& key) const;
+
+  // Perform expensive iteration over the skip list prior to insert so that the
+  // cost of a synchronized insert is reduced when the structure is full.
+  // REQUIRES: same synchronization as is necessary for a read.
+  class InsertHint {
+   public:
+    InsertHint(const SkipList* list, const Key& key);
+
+   private:
+    const SkipList* list_;
+    Node* x_;
+    Node* prev_[kMaxHeight];
+    Node* obs_[kMaxHeight];
+
+    // No copying allowed
+    InsertHint(const InsertHint&);
+    void operator=(const InsertHint&);
+    friend class SkipList;
+  };
 
   // Iteration over the contents of a skip list
   class Iterator {
@@ -92,8 +119,6 @@ class SkipList {
   };
 
  private:
-  enum { kMaxHeight = 12 };
-
   // Immutable after construction
   Comparator const compare_;
   Arena* const arena_;    // Arena used for allocations of nodes
@@ -124,7 +149,7 @@ class SkipList {
   //
   // If prev is non-NULL, fills prev[level] with pointer to previous
   // node at "level" for every level in [0..max_height_-1].
-  Node* FindGreaterOrEqual(const Key& key, Node** prev) const;
+  Node* FindGreaterOrEqual(const Key& key, Node** prev, Node** obs) const;
 
   // Return the latest node with a key < key.
   // Return head_ if there is no such node.
@@ -133,6 +158,9 @@ class SkipList {
   // Return the last node in the list.
   // Return head_ if list is empty.
   Node* FindLast() const;
+
+  // Update the state of the InsertHint to reflect the latest values
+  void UpdateHint(InsertHint* ih, const Key& k);
 
   // No copying allowed
   SkipList(const SkipList&);
@@ -220,7 +248,7 @@ inline void SkipList<Key,Comparator>::Iterator::Prev() {
 
 template<typename Key, class Comparator>
 inline void SkipList<Key,Comparator>::Iterator::Seek(const Key& target) {
-  node_ = list_->FindGreaterOrEqual(target, NULL);
+  node_ = list_->FindGreaterOrEqual(target, NULL, NULL);
 }
 
 template<typename Key, class Comparator>
@@ -256,7 +284,7 @@ bool SkipList<Key,Comparator>::KeyIsAfterNode(const Key& key, Node* n) const {
 }
 
 template<typename Key, class Comparator>
-typename SkipList<Key,Comparator>::Node* SkipList<Key,Comparator>::FindGreaterOrEqual(const Key& key, Node** prev)
+typename SkipList<Key,Comparator>::Node* SkipList<Key,Comparator>::FindGreaterOrEqual(const Key& key, Node** prev, Node** obs)
     const {
   Node* x = head_;
   int level = GetMaxHeight() - 1;
@@ -267,6 +295,7 @@ typename SkipList<Key,Comparator>::Node* SkipList<Key,Comparator>::FindGreaterOr
       x = next;
     } else {
       if (prev != NULL) prev[level] = x;
+      if (obs != NULL) obs[level] = next;
       if (level == 0) {
         return next;
       } else {
@@ -332,10 +361,62 @@ SkipList<Key,Comparator>::SkipList(Comparator cmp, Arena* arena)
 
 template<typename Key, class Comparator>
 void SkipList<Key,Comparator>::Insert(const Key& key) {
-  // TODO(opt): We can use a barrier-free variant of FindGreaterOrEqual()
-  // here since Insert() is externally synchronized.
+  InsertHint ih(this, key);
+  return InsertWithHint(&ih, key);
+}
+
+template<typename Key, class Comparator>
+SkipList<Key,Comparator>::InsertHint::InsertHint(const SkipList* list, const Key& key)
+    : list_(list),
+      x_(NULL) {
+  for (int i = 0; i < kMaxHeight; ++i)
+  {
+    prev_[i] = list_->head_;
+    obs_[i] = NULL;
+  }
+  x_ = list_->FindGreaterOrEqual(key, prev_, obs_);
+}
+
+template<typename Key, class Comparator>
+void SkipList<Key,Comparator>::UpdateHint(InsertHint* ih, const Key& key) {
+  // TODO(opt): We can be smarter here by using the skip list structure to
+  // advance.  It's assumed that a small number of insertions to the SkipList
+  // happen between the time ih was created and now.
+  for (int level = 0; level < kMaxHeight; ++level) {
+    Node* x = ih->prev_[level];
+    while (true) {
+      Node* next = x->Next(level);
+      if (next == ih->obs_[level] || !KeyIsAfterNode(key, next)) {
+        ih->prev_[level] = x;
+        ih->obs_[level] = next;
+        break;
+      }
+      x = next;
+    }
+  }
+  ih->x_ = ih->obs_[0];
+}
+
+template<typename Key, class Comparator>
+void SkipList<Key,Comparator>::InsertWithHint(InsertHint* ih, const Key& key) {
+  // Advance pointers to account for any data written between the creation of
+  // the InsertHint and this call.
+  UpdateHint(ih, key);
   Node* prev[kMaxHeight];
-  Node* x = FindGreaterOrEqual(key, prev);
+  Node* x = ih->x_;
+  for (int i = 0; i < kMaxHeight; ++i) {
+    prev[i] = ih->prev_[i];
+  }
+
+#if 1
+  Node* check_prev[kMaxHeight];
+  Node* check_x = FindGreaterOrEqual(key, check_prev, NULL);
+
+  for (int i = 0; i < GetMaxHeight(); ++i) {
+    assert(check_prev[i] == prev[i]);
+    assert(check_x == x);
+  }
+#endif
 
   // Our data structure does not allow duplicate insertion
   assert(x == NULL || !Equal(key, x->key));
@@ -368,7 +449,7 @@ void SkipList<Key,Comparator>::Insert(const Key& key) {
 
 template<typename Key, class Comparator>
 bool SkipList<Key,Comparator>::Contains(const Key& key) const {
-  Node* x = FindGreaterOrEqual(key, NULL);
+  Node* x = FindGreaterOrEqual(key, NULL, NULL);
   if (x != NULL && Equal(key, x->key)) {
     return true;
   } else {
