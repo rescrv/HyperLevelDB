@@ -9,6 +9,7 @@
 #include "db/log_format.h"
 #include "hyperleveldb/slice.h"
 #include "hyperleveldb/status.h"
+#include "port/port.h"
 
 namespace leveldb {
 
@@ -28,14 +29,15 @@ class Writer {
 
  private:
   WritableFile* dest_;
-  int block_offset_;       // Current offset in block
+  port::Mutex offset_mtx_;
+  uint64_t offset_; // Current offset in file
 
   // crc32c values for all supported record types.  These are
   // pre-computed to reduce the overhead of computing the crc of the
   // record type stored in the header.
   uint32_t type_crc_[kMaxRecordType + 1];
 
-  Status EmitPhysicalRecord(RecordType type, const char* ptr, size_t length);
+  Status EmitPhysicalRecordAt(RecordType type, const char* ptr, uint64_t offset, size_t length);
 
   // No copying allowed
   Writer(const Writer&);

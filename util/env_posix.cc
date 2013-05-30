@@ -268,6 +268,15 @@ class PosixMmapFile : public WritableFile {
     }
   }
 
+  virtual Status WriteAt(uint64_t offset, const Slice& data) {
+    ssize_t written = pwrite(fd_, data.data(), data.size(), offset);
+    Status s;
+    if (written != data.size()) {
+      s = IOError(filename_, errno);
+    }
+    return s;
+  }
+
   virtual Status Append(const Slice& data) {
     const char* src = data.data();
     size_t left = data.size();

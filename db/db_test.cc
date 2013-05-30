@@ -91,6 +91,14 @@ class SpecialEnv : public EnvWrapper {
             base_(base) {
       }
       ~SSTableFile() { delete base_; }
+      Status WriteAt(uint64_t offset, const Slice& data) {
+        if (env_->no_space_.Acquire_Load() != NULL) {
+          // Drop writes on the floor
+          return Status::OK();
+        } else {
+          return base_->WriteAt(offset, data);
+        }
+      }
       Status Append(const Slice& data) {
         if (env_->no_space_.Acquire_Load() != NULL) {
           // Drop writes on the floor
@@ -115,6 +123,13 @@ class SpecialEnv : public EnvWrapper {
      public:
       ManifestFile(SpecialEnv* env, WritableFile* b) : env_(env), base_(b) { }
       ~ManifestFile() { delete base_; }
+      Status WriteAt(uint64_t offset, const Slice& data) {
+        if (env_->manifest_write_error_.Acquire_Load() != NULL) {
+          return Status::IOError("simulated writer error");
+        } else {
+          return base_->WriteAt(offset, data);
+        }
+      }
       Status Append(const Slice& data) {
         if (env_->manifest_write_error_.Acquire_Load() != NULL) {
           return Status::IOError("simulated writer error");

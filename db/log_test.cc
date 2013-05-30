@@ -45,6 +45,15 @@ class LogTest {
     virtual Status Close() { return Status::OK(); }
     virtual Status Flush() { return Status::OK(); }
     virtual Status Sync() { return Status::OK(); }
+    virtual Status WriteAt(uint64_t offset, const Slice& slice) {
+      std::string tmp = contents_.substr(0, offset);
+      tmp.append(slice.data(), slice.size());
+      if (contents_.size() > offset + slice.size()) {
+        tmp += contents_.substr(offset + slice.size());
+      }
+      contents_ = tmp;
+      return Status::OK();
+    }
     virtual Status Append(const Slice& slice) {
       contents_.append(slice.data(), slice.size());
       return Status::OK();
