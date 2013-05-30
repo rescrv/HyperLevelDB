@@ -94,9 +94,10 @@ class DBImpl : public DB {
   Status WriteLevel0Table(MemTable* mem, VersionEdit* edit, Version* base, uint64_t* number)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-  Status MakeRoomForWrite(bool force /* compact even if there is room? */)
+  Status SequenceWriteBegin(Writer* w, WriteBatch* updates)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-  WriteBatch* BuildBatchGroup(Writer** last_writer);
+  void SequenceWriteEnd(Writer* w)
+      EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   static void CompactLevelWrapper(void* db)
   { reinterpret_cast<DBImpl*>(db)->CompactLevelThread(); }
@@ -138,8 +139,8 @@ class DBImpl : public DB {
   log::Writer* log_;
 
   // Queue of writers.
-  std::deque<Writer*> writers_;
-  WriteBatch* tmp_batch_;
+  Writer* writers_;
+  Writer* writers_end_;
 
   SnapshotList snapshots_;
 

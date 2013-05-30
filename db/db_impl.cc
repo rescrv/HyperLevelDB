@@ -35,17 +35,6 @@
 
 namespace leveldb {
 
-// Information kept for every waiting writer
-struct DBImpl::Writer {
-  Status status;
-  WriteBatch* batch;
-  bool sync;
-  bool done;
-  port::CondVar cv;
-
-  explicit Writer(port::Mutex* mu) : cv(mu) { }
-};
-
 struct DBImpl::CompactionState {
   Compaction* const compaction;
 
@@ -127,7 +116,8 @@ DBImpl::DBImpl(const Options& options, const std::string& dbname)
       logfile_(NULL),
       logfile_number_(0),
       log_(NULL),
-      tmp_batch_(new WriteBatch),
+      writers_(NULL),
+      writers_end_(NULL),
       bg_fg_cv_(&mutex_),
       allow_background_activity_(false),
       num_bg_threads_(0),
@@ -174,7 +164,6 @@ DBImpl::~DBImpl() {
   delete versions_;
   if (mem_ != NULL) mem_->Unref();
   if (imm_ != NULL) imm_->Unref();
-  delete tmp_batch_;
   delete log_;
   delete logfile_;
   delete table_cache_;
@@ -1147,125 +1136,68 @@ Status DBImpl::Delete(const WriteOptions& options, const Slice& key) {
   return DB::Delete(options, key);
 }
 
-Status DBImpl::Write(const WriteOptions& options, WriteBatch* my_batch) {
+// Information kept for every waiting writer
+struct DBImpl::Writer {
+  port::CondVar cv;
+  bool linked;
+  Writer* next;
+  uint64_t start_sequence;
+  uint64_t end_sequence;
+  WritableFile* logfile;
+  log::Writer* log;
+  MemTable* mem;
+  WritableFile* old_logfile;
+  log::Writer* old_log;
+
+  explicit Writer(port::Mutex* mtx)
+    : cv(mtx),
+      linked(false),
+      next(NULL),
+      start_sequence(0),
+      end_sequence(0),
+      logfile(NULL),
+      log(NULL),
+      mem(NULL),
+      old_logfile(NULL),
+      old_log(NULL) {
+  }
+  ~Writer() throw () {
+  }
+};
+
+Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
   Writer w(&mutex_);
-  w.batch = my_batch;
-  w.sync = options.sync;
-  w.done = false;
-
-  MutexLock l(&mutex_);
-  writers_.push_back(&w);
-  while (!w.done && &w != writers_.front()) {
-    w.cv.Wait();
-  }
-  if (w.done) {
-    return w.status;
-  }
-
-  // May temporarily unlock and wait.
-  Status status = MakeRoomForWrite(my_batch == NULL);
-  uint64_t last_sequence = versions_->LastSequence();
-  Writer* last_writer = &w;
-  if (status.ok() && my_batch != NULL) {  // NULL batch is for compactions
-    WriteBatch* updates = BuildBatchGroup(&last_writer);
-    WriteBatchInternal::SetSequence(updates, last_sequence + 1);
-    last_sequence += WriteBatchInternal::Count(updates);
-
-    // Add to log and apply to memtable.  We can release the lock
-    // during this phase since &w is currently responsible for logging
-    // and protects against concurrent loggers and concurrent writes
-    // into mem_.
-    {
-      mutex_.Unlock();
-      status = log_->AddRecord(WriteBatchInternal::Contents(updates));
-      if (status.ok() && options.sync) {
-        status = logfile_->Sync();
-      }
-      if (status.ok()) {
-        status = WriteBatchInternal::InsertInto(updates, mem_);
-      }
-      mutex_.Lock();
-    }
-    if (updates == tmp_batch_) tmp_batch_->Clear();
-
-    versions_->SetLastSequence(last_sequence);
-  }
-
-  while (true) {
-    Writer* ready = writers_.front();
-    writers_.pop_front();
-    if (ready != &w) {
-      ready->status = status;
-      ready->done = true;
-      ready->cv.Signal();
-    }
-    if (ready == last_writer) break;
-  }
-
-  // Notify new head of write queue
-  if (!writers_.empty()) {
-    writers_.front()->cv.Signal();
-  }
-
-  return status;
-}
-
-// REQUIRES: Writer list must be non-empty
-// REQUIRES: First writer must have a non-NULL batch
-WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
-  assert(!writers_.empty());
-  Writer* first = writers_.front();
-  WriteBatch* result = first->batch;
-  assert(result != NULL);
-
-  size_t size = WriteBatchInternal::ByteSize(first->batch);
-
-  // Allow the group to grow up to a maximum size, but if the
-  // original write is small, limit the growth so we do not slow
-  // down the small write too much.
-  size_t max_size = 1 << 20;
-  if (size <= (128<<10)) {
-    max_size = size + (128<<10);
-  }
-
-  *last_writer = first;
-  std::deque<Writer*>::iterator iter = writers_.begin();
-  ++iter;  // Advance past "first"
-  for (; iter != writers_.end(); ++iter) {
-    Writer* w = *iter;
-    if (w->sync && !first->sync) {
-      // Do not include a sync write into a batch handled by a non-sync write.
-      break;
-    }
-
-    if (w->batch != NULL) {
-      size += WriteBatchInternal::ByteSize(w->batch);
-      if (size > max_size) {
-        // Do not make batch too big
-        break;
-      }
-
-      // Append to *reuslt
-      if (result == first->batch) {
-        // Switch to temporary batch instead of disturbing caller's batch
-        result = tmp_batch_;
-        assert(WriteBatchInternal::Count(result) == 0);
-        WriteBatchInternal::Append(result, first->batch);
-      }
-      WriteBatchInternal::Append(result, w->batch);
-    }
-    *last_writer = w;
-  }
-  return result;
-}
-
-// REQUIRES: mutex_ is held
-// REQUIRES: this thread is currently at the front of the writer queue
-Status DBImpl::MakeRoomForWrite(bool force) {
-  mutex_.AssertHeld();
-  assert(!writers_.empty());
-  bool allow_delay = !force;
   Status s;
+  s = SequenceWriteBegin(&w, updates);
+
+  if (s.ok() && updates != NULL) { // NULL batch is for compactions
+    WriteBatchInternal::SetSequence(updates, w.start_sequence);
+
+    // Add to log and apply to memtable.  We do this without holding the lock
+    // because both the log and the memtable are safe for concurrent access.
+    // The synchronization with readers occurs with SequenceWriteEnd.
+    s = w.log->AddRecord(WriteBatchInternal::Contents(updates));
+    if (s.ok()) {
+      s = WriteBatchInternal::InsertInto(updates, w.mem);
+    }
+  }
+
+  if (s.ok() && options.sync) {
+    s = w.logfile->Sync();
+  }
+
+  SequenceWriteEnd(&w);
+  return s;
+}
+
+Status DBImpl::SequenceWriteBegin(Writer* w, WriteBatch* updates) {
+  Status s;
+  MutexLock l(&mutex_);
+  bool force = updates == NULL;
+  bool allow_delay = !force;
+  w->old_log = NULL;
+  w->old_logfile = NULL;
+
   while (true) {
     if (!bg_error_.ok()) {
       // Yield previous error
@@ -1287,6 +1219,8 @@ Status DBImpl::MakeRoomForWrite(bool force) {
     } else if (!force &&
                (mem_->ApproximateMemoryUsage() <= options_.write_buffer_size)) {
       // There is room in current memtable
+      // Note that this is a sloppy check.  We can overfill a memtable by the
+      // amount of concurrently written data.
       break;
     } else if (imm_ != NULL) {
       // We have filled up the current memtable, but the previous
@@ -1311,8 +1245,8 @@ Status DBImpl::MakeRoomForWrite(bool force) {
         versions_->ReuseFileNumber(new_log_number);
         break;
       }
-      delete log_;
-      delete logfile_;
+      w->old_log = log_;
+      w->old_logfile = logfile_;
       logfile_ = lfile;
       logfile_number_ = new_log_number;
       log_ = new log::Writer(lfile);
@@ -1321,10 +1255,75 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       mem_ = new MemTable(internal_comparator_);
       mem_->Ref();
       force = false;   // Do not force another compaction if have room
-      bg_memtable_cv_.Signal();
+      break;
     }
   }
+
+  if (s.ok()) {
+    w->linked = true;
+    w->next = NULL;
+    uint64_t last_sequence = 0;
+    if (writers_end_) {
+      last_sequence = writers_end_->end_sequence;
+    } else {
+      last_sequence = versions_->LastSequence();
+    }
+    w->start_sequence = last_sequence + 1;
+    if (updates) {
+      w->end_sequence = last_sequence + WriteBatchInternal::Count(updates);
+    } else {
+      w->end_sequence = last_sequence;
+    }
+
+    w->logfile = logfile_;
+    w->log = log_;
+    w->mem = mem_;
+    w->mem->Ref();
+
+    if (writers_end_) {
+      writers_end_->next = w;
+      writers_end_ = w;
+    } else {
+      assert(!writers_);
+      writers_ = w;
+      writers_end_ = w;
+    }
+  }
+
   return s;
+}
+
+void DBImpl::SequenceWriteEnd(Writer* w) {
+  if (!w->linked) {
+    return;
+  }
+
+  MutexLock l(&mutex_);
+
+  while (writers_ != w) {
+    w->cv.Wait();
+  }
+
+  writers_ = writers_->next;
+  if (writers_ == NULL) {
+    writers_end_ = NULL;
+  } else {
+    writers_->cv.Signal();
+  }
+
+  versions_->SetLastSequence(w->end_sequence);
+
+  // must do in order: log, logfile
+  if (w->old_log) {
+    assert(w->old_logfile);
+    delete w->old_log;
+    delete w->old_logfile;
+    bg_memtable_cv_.Signal();
+  }
+
+  if (w->mem) {
+    w->mem->Unref();
+  }
 }
 
 bool DBImpl::GetProperty(const Slice& property, std::string* value) {
