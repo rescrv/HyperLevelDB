@@ -408,7 +408,7 @@ void SkipList<Key,Comparator>::InsertWithHint(InsertHint* ih, const Key& key) {
     prev[i] = ih->prev_[i];
   }
 
-#if 1
+#if 0
   Node* check_prev[kMaxHeight];
   Node* check_x = FindGreaterOrEqual(key, check_prev, NULL);
 
