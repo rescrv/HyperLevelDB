@@ -214,7 +214,6 @@ class WritableFileImpl : public WritableFile {
   }
 
   virtual Status Close() { return Status::OK(); }
-  virtual Status Flush() { return Status::OK(); }
   virtual Status Sync() { return Status::OK(); }
 
  private:

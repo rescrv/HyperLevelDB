@@ -124,9 +124,6 @@ Status Writer::EmitPhysicalRecordAt(RecordType t, const char* ptr, uint64_t offs
   Status s = dest_->WriteAt(offset, Slice(buf, kHeaderSize));
   if (s.ok()) {
     s = dest_->WriteAt(offset + kHeaderSize, Slice(ptr, n));
-    if (s.ok()) {
-      s = dest_->Flush();
-    }
   }
   return s;
 }

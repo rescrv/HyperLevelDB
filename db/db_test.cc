@@ -108,7 +108,6 @@ class SpecialEnv : public EnvWrapper {
         }
       }
       Status Close() { return base_->Close(); }
-      Status Flush() { return base_->Flush(); }
       Status Sync() {
         while (env_->delay_sstable_sync_.Acquire_Load() != NULL) {
           env_->SleepForMicroseconds(100000);
@@ -138,7 +137,6 @@ class SpecialEnv : public EnvWrapper {
         }
       }
       Status Close() { return base_->Close(); }
-      Status Flush() { return base_->Flush(); }
       Status Sync() {
         if (env_->manifest_sync_error_.Acquire_Load() != NULL) {
           return Status::IOError("simulated sync error");
