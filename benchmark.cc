@@ -9,9 +9,9 @@
 //     * Redistributions in binary form must reproduce the above copyright
 //       notice, this list of conditions and the following disclaimer in the
 //       documentation and/or other materials provided with the distribution.
-//     * Neither the name of Replicant nor the names of its contributors may be
-//       used to endorse or promote products derived from this software without
-//       specific prior written permission.
+//     * Neither the name of HyperLevelDB nor the names of its contributors may
+//       be used to endorse or promote products derived from this software
+//       without specific prior written permission.
 //
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -25,8 +25,12 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-// POSIX
-#include <errno.h>
+// C
+#include <cstdlib>
+
+// STL
+#include <tr1/memory>
+#include <vector>
 
 // LevelDB
 #include <hyperleveldb/cache.h>
@@ -34,111 +38,75 @@
 #include <hyperleveldb/filter_policy.h>
 
 // po6
-#include <po6/error.h>
+#include <po6/io/fd.h>
+#include <po6/threads/thread.h>
 
 // e
 #include <e/guard.h>
-#include <e/time.h>
 
-static int
-process_file(const char* filename, leveldb::DB* db)
-{
-    FILE* fin = fopen(filename, "r");
+// armnod
+#include <armnod.h>
 
-    if (!fin)
-    {
-        fprintf(stderr, "could not open %s: %s\n", filename, strerror(errno));
-        return EXIT_FAILURE;
-    }
+static long _done = 0;
+static long _number = 1000000;
+static long _threads = 1;
 
-    uint64_t t_start = e::time();
-    uint64_t processed = 0;
+static struct poptOption _popts[] = {
+    {"number", 'n', POPT_ARG_LONG, &_number, 0,
+     "perform N operations against the database (default: 1000000)", "N"},
+    {"threads", 't', POPT_ARG_LONG, &_threads, 0,
+     "run the test with T concurrent threads (default: 1)", "T"},
+    POPT_TABLEEND
+};
 
-    while (true)
-    {
-        char* line = NULL;
-        size_t line_sz = 0;
-        ssize_t amt = getline(&line, &line_sz, fin);
-
-        if (amt < 0)
-        {
-            if (ferror(fin) != 0)
-            {
-                fprintf(stderr, "could not read from %s: %s\n", filename, strerror(ferror(fin)));
-                fclose(fin);
-                return EXIT_FAILURE;
-            }
-
-            if (feof(fin) != 0)
-            {
-                break;
-            }
-
-            fprintf(stderr, "unknown error when reading from %s\n", filename);
-            fclose(fin);
-            return EXIT_FAILURE;
-        }
-
-        if (amt < 1)
-        {
-            free(line);
-            fprintf(stderr, "skipping blank line in %s\n", filename);
-            continue;
-        }
-
-        /* wipe out the newline */
-        line[amt - 1] = '\0';
-        char* tmp = strchr(line, ' ');
-
-        if (!tmp)
-        {
-            free(line);
-            fprintf(stderr, "skipping invalid line in %s\n", filename);
-            continue;
-        }
-
-        *tmp = '\0';
-
-        /* issue a "get" operation */
-        char* k = line;
-        size_t k_sz = tmp - k;
-        std::string val;
-        leveldb::ReadOptions ropts;
-        leveldb::Status rst = db->Get(ropts, leveldb::Slice(k, k_sz), &val);
-
-        /* issue a "put" operation */
-        char* v = tmp + 1;
-        size_t v_sz = (line + amt - 1) - v;
-        leveldb::WriteOptions wopts;
-        wopts.sync = false;
-        leveldb::Status wst = db->Put(wopts, leveldb::Slice(k, k_sz), leveldb::Slice(v, v_sz));
-        free(line);
-
-        if (!wst.ok())
-        {
-            return EXIT_FAILURE;
-        }
-
-        ++processed;
-    }
-
-    uint64_t t_end = e::time();
-    fclose(fin);
-    double tput = processed;
-    tput = tput / ((t_end - t_start) / 1000000000.);
-    fprintf(stdout, "processd %s: %ld ops in %f seconds = %f ops/second\n", filename, processed, (t_end - t_start) / 1000000000., tput);
-    return EXIT_SUCCESS;
-}
+static void
+worker_thread(leveldb::DB*,
+              const armnod::argparser& _k,
+              const armnod::argparser& _v);
 
 int
 main(int argc, const char* argv[])
 {
+    armnod::argparser key_parser("key-");
+    armnod::argparser value_parser("value-");
+    std::vector<poptOption> popts;
+    poptOption s[] = {POPT_AUTOHELP {NULL, 0, POPT_ARG_INCLUDE_TABLE, _popts, 0, "Benchmark:", NULL}, POPT_TABLEEND};
+    popts.push_back(s[0]);
+    popts.push_back(s[1]);
+    popts.push_back(key_parser.options("Key Generation:"));
+    popts.push_back(value_parser.options("Value Generation:"));
+    popts.push_back(s[2]);
+    poptContext poptcon;
+    poptcon = poptGetContext(NULL, argc, argv, &popts.front(), POPT_CONTEXT_POSIXMEHARDER);
+    e::guard g = e::makeguard(poptFreeContext, poptcon); g.use_variable();
+    poptSetOtherOptionHelp(poptcon, "[OPTIONS]");
+
+    int rc;
+
+    while ((rc = poptGetNextOpt(poptcon)) != -1)
+    {
+        switch (rc)
+        {
+            case POPT_ERROR_NOARG:
+            case POPT_ERROR_BADOPT:
+            case POPT_ERROR_BADNUMBER:
+            case POPT_ERROR_OVERFLOW:
+                std::cerr << poptStrerror(rc) << " " << poptBadOption(poptcon, 0) << std::endl;
+                return EXIT_FAILURE;
+            case POPT_ERROR_OPTSTOODEEP:
+            case POPT_ERROR_BADQUOTE:
+            case POPT_ERROR_ERRNO:
+            default:
+                std::cerr << "logic error in argument parsing" << std::endl;
+                return EXIT_FAILURE;
+        }
+    }
+
     leveldb::Options opts;
     opts.create_if_missing = true;
-    opts.write_buffer_size = 64ULL * 1024ULL * 1024ULL;
+    opts.write_buffer_size = 16ULL * 1024ULL * 1024ULL;
     opts.filter_policy = leveldb::NewBloomFilterPolicy(10);
     //opts.block_cache = leveldb::NewLRUCache(64ULL * 1024ULL * 1024ULL);
-    opts.block_size = 65536;
     leveldb::DB* db;
     leveldb::Status st = leveldb::DB::Open(opts, ".", &db);
 
@@ -148,20 +116,72 @@ main(int argc, const char* argv[])
         return EXIT_FAILURE;
     }
 
-    for (int i = 1; i < argc; ++i)
-    {
-        int rc = process_file(argv[i], db);
+    typedef std::tr1::shared_ptr<po6::threads::thread> thread_ptr;
+    std::vector<thread_ptr> threads;
 
-        if (rc != EXIT_SUCCESS)
-        {
-            delete db;
-            return rc;
-        }
+    for (size_t i = 0; i < _threads; ++i)
+    {
+        thread_ptr t(new po6::threads::thread(std::tr1::bind(worker_thread, db, key_parser, value_parser)));
+        threads.push_back(t);
+        t->start();
+    }
+
+    for (size_t i = 0; i < threads.size(); ++i)
+    {
+        threads[i]->join();
     }
 
     std::string tmp;
     if (db->GetProperty("leveldb.stats", &tmp)) std::cout << tmp << std::endl;
-
     delete db;
     return EXIT_SUCCESS;
+}
+
+static uint64_t
+get_random()
+{
+    po6::io::fd sysrand(open("/dev/urandom", O_RDONLY));
+
+    if (sysrand.get() < 0)
+    {
+        return 0xcafebabe;
+    }
+
+    uint64_t ret;
+
+    if (sysrand.read(&ret, sizeof(ret)) != sizeof(ret))
+    {
+        return 0xdeadbeef;
+    }
+
+    return ret;
+}
+
+void
+worker_thread(leveldb::DB* db,
+              const armnod::argparser& _k,
+              const armnod::argparser& _v)
+{
+    armnod::generator key(armnod::argparser(_k).config());
+    armnod::generator val(armnod::argparser(_v).config());
+    key.seed(get_random());
+    val.seed(get_random());
+
+    while (__sync_fetch_and_add(&_done, 1) < _number)
+    {
+        std::string k = key();
+        std::string v = val();
+
+        // issue a "get"
+        std::string tmp;
+        leveldb::ReadOptions ropts;
+        leveldb::Status rst = db->Get(ropts, leveldb::Slice(k.data(), k.size()), &tmp);
+        assert(rst.ok() || rst.NotFound());
+
+        // issue a "put"
+        leveldb::WriteOptions wopts;
+        wopts.sync = false;
+        leveldb::Status wst = db->Put(wopts, leveldb::Slice(k.data(), k.size()), leveldb::Slice(v.data(), v.size()));
+        assert(wst.ok());
+    }
 }
