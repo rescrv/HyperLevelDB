@@ -179,70 +179,67 @@ class PosixMmapReadableFile: public RandomAccessFile {
 // data to the file.  This is safe since we either properly close the
 // file before reading from it, or for log files, the reading code
 // knows enough to skip zero suffixes.
+// TODO:  I use GCC intrinsics here.  I don't feel bad about this, but it
+// hinders portability.
 class PosixMmapFile : public WritableFile {
  private:
-  std::string filename_;
-  int fd_;
-  size_t page_size_;
-  size_t map_size_;       // How much extra memory to map at a time
-  char* base_;            // The mapped region
-  char* limit_;           // Limit of the mapped region
-  char* dst_;             // Where to write next  (in range [base_,limit_])
-  char* last_sync_;       // Where have we synced up to
-  uint64_t file_offset_;  // Offset of base_ in file
+  struct MmapSegment {
+    MmapSegment* next_;     // the next-lowest Map segment in the file
+    uint64_t file_offset_;  // Offset of base_ in file
+    uint64_t written_;      // The amount of data written to this segment
+    uint64_t size_;         // The size of the mapped region
+    char* base_;            // The mapped region
+  };
 
-  // Have we done an munmap of unsynced data?
-  bool pending_sync_;
+  std::string filename_;    // Path to the file
+  int fd_;                  // The open file
+  size_t page_size_;        // System page size
+  uint64_t sync_offset_;    // Offset of the last sync call
+  uint64_t end_offset_;     // Where does the file end?
+  MmapSegment* segments_;   // mmap'ed regions of memory
+  port::Mutex mtx_;         // Synchronize and shit
 
   // Roundup x to a multiple of y
   static size_t Roundup(size_t x, size_t y) {
     return ((x + y - 1) / y) * y;
   }
 
-  size_t TruncateToPageBoundary(size_t s) {
-    s -= (s & (page_size_ - 1));
-    assert((s % page_size_) == 0);
-    return s;
+  MmapSegment* GetSegment(uint64_t offset) {
+    MutexLock l(&mtx_);
+    while (true) {
+      MmapSegment* seg = segments_;
+      while (seg && seg->file_offset_ > offset) {
+        seg = seg->next_;
+      }
+      if (!seg || seg->file_offset_ + seg->size_ <= offset) {
+        assert(seg == segments_);
+        MmapSegment* new_seg = new MmapSegment();
+        new_seg->next_ = seg;
+        new_seg->file_offset_ = seg ? seg->file_offset_ + seg-> size_ : 0;
+        new_seg->written_ = 0;
+        new_seg->size_ = seg ? seg->size_ : Roundup(1 << 20, page_size_);
+        if (ftruncate(fd_, new_seg->file_offset_ + new_seg->size_) < 0) {
+          delete new_seg;
+          return NULL;
+        }
+        void* ptr = mmap(NULL, new_seg->size_, PROT_READ | PROT_WRITE, MAP_SHARED,
+                         fd_, new_seg->file_offset_);
+        if (ptr == MAP_FAILED) {
+          delete new_seg;
+          return NULL;
+        }
+        new_seg->base_ = reinterpret_cast<char*>(ptr);
+        segments_ = new_seg;
+        continue;
+      }
+      assert(seg &&
+             seg->file_offset_ <= offset &&
+             seg->file_offset_ + seg->size_ > offset);
+      return seg;
+    }
   }
 
-  bool UnmapCurrentRegion() {
-    bool result = true;
-    if (base_ != NULL) {
-      if (last_sync_ < limit_) {
-        // Defer syncing this data until next Sync() call, if any
-        pending_sync_ = true;
-      }
-      if (munmap(base_, limit_ - base_) != 0) {
-        result = false;
-      }
-      file_offset_ += limit_ - base_;
-      base_ = NULL;
-      limit_ = NULL;
-      last_sync_ = NULL;
-      dst_ = NULL;
-
-      // Increase the amount we map the next time, but capped at 1MB
-      if (map_size_ < (1<<20)) {
-        map_size_ *= 2;
-      }
-    }
-    return result;
-  }
-
-  bool MapNewRegion() {
-    assert(base_ == NULL);
-    if (ftruncate(fd_, file_offset_ + map_size_) < 0) {
-      return false;
-    }
-    void* ptr = mmap(NULL, map_size_, PROT_READ | PROT_WRITE, MAP_SHARED,
-                     fd_, file_offset_);
-    if (ptr == MAP_FAILED) {
-      return false;
-    }
-    base_ = reinterpret_cast<char*>(ptr);
-    limit_ = base_ + map_size_;
-    dst_ = base_;
-    last_sync_ = base_;
+  bool ReleaseSegment(MmapSegment* seg, bool full) {
     return true;
   }
 
@@ -251,16 +248,12 @@ class PosixMmapFile : public WritableFile {
       : filename_(fname),
         fd_(fd),
         page_size_(page_size),
-        map_size_(Roundup(65536, page_size)),
-        base_(NULL),
-        limit_(NULL),
-        dst_(NULL),
-        last_sync_(NULL),
-        file_offset_(0),
-        pending_sync_(false) {
+        sync_offset_(0),
+        end_offset_(0),
+        segments_(NULL),
+        mtx_() {
     assert((page_size & (page_size - 1)) == 0);
   }
-
 
   ~PosixMmapFile() {
     if (fd_ >= 0) {
@@ -269,47 +262,56 @@ class PosixMmapFile : public WritableFile {
   }
 
   virtual Status WriteAt(uint64_t offset, const Slice& data) {
-    ssize_t written = pwrite(fd_, data.data(), data.size(), offset);
-    Status s;
-    if (written != data.size()) {
-      s = IOError(filename_, errno);
+    uint64_t end = offset + data.size();
+    const char* src = data.data();
+    uint64_t left = data.size();
+    while (left > 0) {
+      MmapSegment* seg = GetSegment(offset);
+      if (!seg) {
+        return IOError(filename_, errno);
+      }
+
+      assert(offset >= seg->file_offset_);
+      assert(offset < seg->file_offset_ + seg->size_);
+      uint64_t local_offset = offset  - seg->file_offset_;
+      uint64_t avail = seg->size_ - local_offset;
+      uint64_t n = (left <= avail) ? left : avail;
+      memcpy(seg->base_ + local_offset, src, n);
+      src += n;
+      left -= n;
+      offset += n;
+      uint64_t written = __sync_add_and_fetch(&seg->written_, n);
+
+      if (!ReleaseSegment(seg, written == seg->size_)) {
+        return IOError(filename_, errno);
+      }
     }
-    return s;
+    uint64_t old_end = end;
+    do {
+      old_end = __sync_val_compare_and_swap(&end_offset_, old_end, end);
+    } while (old_end < end);
+    return Status::OK();
   }
 
   virtual Status Append(const Slice& data) {
-    const char* src = data.data();
-    size_t left = data.size();
-    while (left > 0) {
-      assert(base_ <= dst_);
-      assert(dst_ <= limit_);
-      size_t avail = limit_ - dst_;
-      if (avail == 0) {
-        if (!UnmapCurrentRegion() ||
-            !MapNewRegion()) {
-          return IOError(filename_, errno);
-        }
-      }
-
-      size_t n = (left <= avail) ? left : avail;
-      memcpy(dst_, src, n);
-      dst_ += n;
-      src += n;
-      left -= n;
-    }
-    return Status::OK();
+    uint64_t offset = __sync_val_compare_and_swap(&end_offset_, 0, 0);
+    return WriteAt(offset, data);
   }
 
   virtual Status Close() {
     Status s;
-    size_t unused = limit_ - dst_;
-    if (!UnmapCurrentRegion()) {
-      s = IOError(filename_, errno);
-    } else if (unused > 0) {
-      // Trim the extra space at the end of the file
-      if (ftruncate(fd_, file_offset_ - unused) < 0) {
+    while (segments_) {
+      MmapSegment* seg = segments_;
+      segments_ = seg->next_;
+      if (munmap(seg->base_, seg->size_) < 0) {
         s = IOError(filename_, errno);
       }
+      seg->base_ = NULL;
+      delete seg;
+    }
+
+    if (ftruncate(fd_, end_offset_) < 0) {
+      s = IOError(filename_, errno);
     }
 
     if (close(fd_) < 0) {
@@ -319,29 +321,22 @@ class PosixMmapFile : public WritableFile {
     }
 
     fd_ = -1;
-    base_ = NULL;
-    limit_ = NULL;
     return s;
   }
 
   virtual Status Sync() {
     Status s;
+    bool need_sync = false;
 
-    if (pending_sync_) {
-      // Some unmapped data was not synced
-      pending_sync_ = false;
-      if (fdatasync(fd_) < 0) {
-        s = IOError(filename_, errno);
-      }
+    {
+      MutexLock l(&mtx_);
+      need_sync = sync_offset_ != end_offset_;
+      sync_offset_ = end_offset_;
     }
 
-    if (dst_ > last_sync_) {
-      // Find the beginnings of the pages that contain the first and last
-      // bytes to be synced.
-      size_t p1 = TruncateToPageBoundary(last_sync_ - base_);
-      size_t p2 = TruncateToPageBoundary(dst_ - base_ - 1);
-      last_sync_ = dst_;
-      if (msync(base_ + p1, p2 - p1 + page_size_, MS_SYNC) < 0) {
+    if (need_sync) {
+      // Some unmapped data was not synced
+      if (fdatasync(fd_) < 0) {
         s = IOError(filename_, errno);
       }
     }
