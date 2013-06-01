@@ -199,11 +199,16 @@ class VersionSet {
   // being compacted, or zero if there is no such log file.
   uint64_t PrevLogNumber() const { return prev_log_number_; }
 
-  // Pick level and inputs for a new compaction.
+  // Pick level for a new compaction.
+  // Returns kNumLevels if there is no compaction to be done.
+  // Otherwise returns the lowest unlocked level that may compact upwards.
+  int PickCompactionLevel(bool* locked);
+
+  // Pick inputs for a new compaction at the specified level.
   // Returns NULL if there is no compaction to be done.
   // Otherwise returns a pointer to a heap-allocated object that
   // describes the compaction.  Caller should delete the result.
-  Compaction* PickCompaction(bool* levels);
+  Compaction* PickCompaction(int level);
 
   // Return a compaction object for compacting the range [begin,end] in
   // the specified level.  Returns NULL if there is nothing in that
@@ -348,6 +353,13 @@ class Compaction {
   // is successful.
   void ReleaseInputs();
 
+  // Set and get the ratio of inputs to outputs.
+  // If nonzero, this is the ratio of inputs to outputs.  If zero, it indicates
+  // that the compaction was chosen without concern for the ratio of inputs to
+  // outputs.
+  void SetRatio(double ratio) { ratio_ = ratio; }
+  double ratio() { return ratio_; }
+
  private:
   friend class Version;
   friend class VersionSet;
@@ -358,6 +370,8 @@ class Compaction {
   uint64_t max_output_file_size_;
   Version* input_version_;
   VersionEdit edit_;
+
+  double ratio_;
 
   // Each compaction reads inputs from "level_" and "level_+1"
   std::vector<FileMetaData*> inputs_[2];      // The two sets of inputs

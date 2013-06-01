@@ -1259,31 +1259,37 @@ void VersionSet::GetCompactionBoundaries(int level,
   }
 }
 
-Compaction* VersionSet::PickCompaction(bool* levels) {
-  // Find the level with the highest ratio of compaction scores between level
-  // and level + 1 where level's score >= 1.
-  int best_level = -1;
-  for (int i = config::kNumLevels - 1; i >= 0; --i) {
-    if (levels[i] || levels[i + 1]) {
+int VersionSet::PickCompactionLevel(bool* locked) {
+  // Find an unlocked level has score >= 1 where level + 1 has score < 1.
+  int level = config::kNumLevels;
+  for (int i = 0; i + 1 < config::kNumLevels; ++i) {
+    if (locked[i] || locked[i + 1]) {
       continue;
     }
-    if (current_->compaction_scores_[i] >= 1.0 &&
+    if (current_->compaction_scores_[i + 0] >= 1.0 &&
         current_->compaction_scores_[i + 1] < 1.0) {
-      best_level = i;
+      level = i;
       break;
     }
   }
+  return level;
+}
 
+Compaction* VersionSet::PickCompaction(int level) {
+  assert(0 <= level && level < config::kNumLevels);
   bool trivial = false;
-  Compaction* c = NULL;
-  // If there's a level we can work with
-  if (best_level >= 0) {
+
+  Compaction* c = new Compaction(level);
+  c->input_version_ = current_;
+  c->input_version_->Ref();
+
+  if (level > 0) {
     std::vector<FileMetaData*> LA;
     std::vector<FileMetaData*> LB;
     std::vector<uint64_t> LA_sizes;
     std::vector<uint64_t> LB_sizes;
     std::vector<CompactionBoundary> boundaries;
-    GetCompactionBoundaries(best_level, &LA, &LB, &LA_sizes, &LB_sizes, &boundaries);
+    GetCompactionBoundaries(level, &LA, &LB, &LA_sizes, &LB_sizes, &boundaries);
 
     // find the best set of files: maximize the ratio of sizeof(LA)/sizeof(LB)
     // while keeping sizeof(LA)+sizeof(LB) < some threshold.  If there's a tie
@@ -1300,7 +1306,7 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
           trivial = true;
           break;
         }
-        if (sz_a + sz_b >= MaxCompactionBytesForLevel(best_level)) {
+        if (sz_a + sz_b >= MaxCompactionBytesForLevel(level)) {
           break;
         }
         assert(sz_b > 0); // true because we exclude trivial moves
@@ -1317,24 +1323,22 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
 
     // Trivial moves have a near-0 cost, so do them first.
     if (trivial) {
-      c = new Compaction(best_level);
       for (size_t i = 0; i < LA.size(); ++i) {
         if (boundaries[i].start == boundaries[i].limit) {
           c->inputs_[0].push_back(LA[i]);
         }
       }
-      trivial = best_level != 0;
+      trivial = level != 0;
+      c->SetRatio(1.0);
     // If the best we could do would be wasteful and the best level has more
     // data in it than the next level would have, move it all
     } else if (best_ratio >= 0.0 &&
                LA_sizes.back() * best_ratio >= LB_sizes.back()) {
-      c = new Compaction(best_level);
       for (size_t i = 0 ; i < LA.size(); ++i) {
         c->inputs_[0].push_back(LA[i]);
       }
     // otherwise go with the best ratio
     } else if (best_ratio >= 0.0) {
-      c = new Compaction(best_level);
       for (size_t i = best_idx_start; i < best_idx_limit; ++i) {
         assert(i >= 0 && i < LA.size());
         c->inputs_[0].push_back(LA[i]);
@@ -1344,11 +1348,11 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
         assert(i >= 0 && i < LB.size());
         c->inputs_[1].push_back(LB[i]);
       }
+      c->SetRatio(best_ratio);
     // otherwise just pick the file with least overlap
     } else {
-      assert(best_level >= 0);
-      assert(best_level+1 < config::kNumLevels);
-      c = new Compaction(best_level);
+      assert(level >= 0);
+      assert(level+1 < config::kNumLevels);
       // Pick the file that overlaps with the fewest files in the next level
       size_t largest = boundaries.size();
       size_t smallest = boundaries.size();
@@ -1365,25 +1369,13 @@ Compaction* VersionSet::PickCompaction(bool* levels) {
         c->inputs_[1].push_back(LB[i]);
       }
     }
+  } else {
+    for (size_t i = 0; i < current_->files_[0].size(); ++i) {
+      c->inputs_[0].push_back(current_->files_[0][i]);
+    }
   }
 
-  if (!c) {
-    return NULL;
-  }
-
-  c->input_version_ = current_;
-  c->input_version_->Ref();
-
-  // Files in level 0 may overlap each other, so pick up all overlapping ones
-  if (best_level == 0) {
-    InternalKey smallest, largest;
-    GetRange(c->inputs_[0], &smallest, &largest);
-    // Note that the next call will discard the file we placed in
-    // c->inputs_[0] earlier and replace it with an overlapping set
-    // which will include the picked file.
-    current_->GetOverlappingInputs(0, &smallest, &largest, &c->inputs_[0]);
-    assert(!c->inputs_[0].empty());
-  }
+  assert(!c->inputs_[0].empty());
 
   if (!trivial) {
     SetupOtherInputs(c);
@@ -1438,7 +1430,8 @@ Compaction* VersionSet::CompactRange(
 Compaction::Compaction(int level)
     : level_(level),
       max_output_file_size_(MaxFileSizeForLevel(level)),
-      input_version_(NULL) {
+      input_version_(NULL),
+      ratio_(0) {
   for (int i = 0; i < config::kNumLevels; i++) {
     level_ptrs_[i] = 0;
   }

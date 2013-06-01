@@ -670,7 +670,7 @@ void DBImpl::CompactLevelThread() {
 
 Status DBImpl::BackgroundCompaction() {
   mutex_.AssertHeld();
-  Compaction* c;
+  Compaction* c = NULL;
   bool is_manual = (manual_compaction_ != NULL);
   InternalKey manual_end;
   if (is_manual) {
@@ -687,7 +687,10 @@ Status DBImpl::BackgroundCompaction() {
         (m->end ? m->end->DebugString().c_str() : "(end)"),
         (m->done ? "(end)" : manual_end.DebugString().c_str()));
   } else {
-    c = versions_->PickCompaction(levels_locked_);
+    int level = versions_->PickCompactionLevel(levels_locked_);
+    if (level != config::kNumLevels) {
+      c = versions_->PickCompaction(level);
+    }
     if (c) {
       assert(!levels_locked_[c->level() + 0]);
       assert(!levels_locked_[c->level() + 1]);
