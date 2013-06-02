@@ -123,16 +123,18 @@ DBImpl::DBImpl(const Options& options, const std::string& dbname)
       num_bg_threads_(0),
       bg_compaction_cv_(&mutex_),
       bg_memtable_cv_(&mutex_),
+      bg_optimistic_trip_(false),
+      bg_optimistic_cv_(&mutex_),
       bg_log_cv_(&mutex_),
       bg_log_occupied_(false),
       manual_compaction_(NULL) {
   mutex_.Lock();
   mem_->Ref();
   has_imm_.Release_Store(NULL);
-  // For now, only two threads are safe.
   env_->StartThread(&DBImpl::CompactMemTableWrapper, this);
+  env_->StartThread(&DBImpl::CompactOptimisticWrapper, this);
   env_->StartThread(&DBImpl::CompactLevelWrapper, this);
-  num_bg_threads_ = 2;
+  num_bg_threads_ = 3;
 
   // Reserve ten files or so for other uses and give the rest to TableCache.
   const int table_cache_size = options.max_open_files - 10;
@@ -150,6 +152,7 @@ DBImpl::~DBImpl() {
   // Wait for background work to finish
   mutex_.Lock();
   shutting_down_.Release_Store(this);  // Any non-NULL value is ok
+  bg_optimistic_cv_.SignalAll();
   bg_compaction_cv_.SignalAll();
   bg_memtable_cv_.SignalAll();
   while (num_bg_threads_ > 0) {
@@ -556,6 +559,12 @@ void DBImpl::CompactMemTableThread() {
       env_->SleepForMicroseconds(1000000);
       mutex_.Lock();
     }
+
+    assert(config::kL0_SlowdownWritesTrigger > 0);
+    if (versions_->NumLevelFiles(0) >= config::kL0_SlowdownWritesTrigger - 1) {
+      bg_optimistic_trip_ = true;
+      bg_optimistic_cv_.Signal();
+    }
   }
   Log(options_.info_log, "cleaning up CompactMemTableThread");
   num_bg_threads_ -= 1;
@@ -645,7 +654,7 @@ void DBImpl::CompactLevelThread() {
     if (shutting_down_.Acquire_Load()) {
       break;
     }
-    assert(manual_compaction_ == NULL || num_bg_threads_ == 2);
+    assert(manual_compaction_ == NULL || num_bg_threads_ == 3);
 
     Status s = BackgroundCompaction();
     bg_fg_cv_.SignalAll(); // before the backoff In case a waiter 
@@ -762,6 +771,130 @@ Status DBImpl::BackgroundCompaction() {
     manual_compaction_ = NULL;
   }
   return status;
+}
+
+void DBImpl::CompactOptimisticThread() {
+  MutexLock l(&mutex_);
+  while (!shutting_down_.Acquire_Load() && !allow_background_activity_) {
+    bg_optimistic_cv_.Wait();
+  }
+  while (!shutting_down_.Acquire_Load()) {
+    while (!shutting_down_.Acquire_Load() && !bg_optimistic_trip_) {
+      bg_optimistic_cv_.Wait();
+    }
+    if (shutting_down_.Acquire_Load()) {
+      break;
+    }
+    bg_optimistic_trip_ = false;
+    Status s = OptimisticCompaction();
+
+    if (!shutting_down_.Acquire_Load() && !s.ok())
+      // Wait a little bit before retrying background compaction in
+      // case this is an environmental problem and we do not want to
+      // chew up resources for failed compactions for the duration of
+      // the problem.
+      Log(options_.info_log, "Waiting after optimistic compaction error: %s",
+          s.ToString().c_str());
+      mutex_.Unlock();
+      env_->SleepForMicroseconds(1000000);
+      mutex_.Lock();
+  }
+  Log(options_.info_log, "cleaning up OptimisticCompactThread");
+  num_bg_threads_ -= 1;
+  bg_fg_cv_.SignalAll();
+}
+
+Status DBImpl::OptimisticCompaction() {
+  mutex_.AssertHeld();
+  Log(options_.info_log, "Optimistic compaction started");
+  bool did_compaction = true;
+  uint64_t iters = 0;
+  while (did_compaction) {
+    ++iters;
+    did_compaction = false;
+    Compaction* c = NULL;
+    for (size_t level = 0; level + 1 < config::kNumLevels; ++level) {
+      if (levels_locked_[level] || levels_locked_[level + 1]) {
+        continue;
+      }
+      Compaction* tmp = versions_->PickCompaction(level);
+      if (tmp && tmp->IsTrivialMove()) {
+        if (c) {
+          delete c;
+        }
+        c = tmp;
+        break;
+      } else if (c && tmp && c->ratio() < tmp->ratio()) {
+        delete c;
+        c = tmp;
+      } else if (!c) {
+        c = tmp;
+      } else {
+        delete tmp;
+      }
+    }
+    if (!c) {
+      continue;
+    }
+    if (!c->IsTrivialMove() && c->ratio() < .90) {
+      delete c;
+      continue;
+    }
+    assert(!levels_locked_[c->level() + 0]);
+    assert(!levels_locked_[c->level() + 1]);
+    levels_locked_[c->level() + 0] = true;
+    levels_locked_[c->level() + 1] = true;
+
+    did_compaction = true;
+    Status status;
+
+    if (c->IsTrivialMove() && c->level() > 0) {
+      // Move file to next level
+      for (size_t i = 0; i < c->num_input_files(0); ++i) {
+        FileMetaData* f = c->input(0, i);
+        c->edit()->DeleteFile(c->level(), f->number);
+        c->edit()->AddFile(c->level() + 1, f->number, f->file_size,
+                           f->smallest, f->largest);
+      }
+      status = versions_->LogAndApply(c->edit(), &mutex_, &bg_log_cv_, &bg_log_occupied_);
+      VersionSet::LevelSummaryStorage tmp;
+      for (size_t i = 0; i < c->num_input_files(0); ++i) {
+        FileMetaData* f = c->input(0, i);
+        Log(options_.info_log, "Moved #%lld to level-%d %lld bytes %s: %s\n",
+            static_cast<unsigned long long>(f->number),
+            c->level() + 1,
+            static_cast<unsigned long long>(f->file_size),
+            status.ToString().c_str(),
+            versions_->LevelSummary(&tmp));
+      }
+    } else {
+      CompactionState* compact = new CompactionState(c);
+      status = DoCompactionWork(compact);
+      CleanupCompaction(compact);
+      c->ReleaseInputs();
+      DeleteObsoleteFiles();
+    }
+
+    levels_locked_[c->level() + 0] = false;
+    levels_locked_[c->level() + 1] = false;
+    delete c;
+
+    if (status.ok()) {
+      // Done
+    } else if (shutting_down_.Acquire_Load()) {
+      // Ignore compaction errors found during shutting down
+      break;
+    } else {
+      Log(options_.info_log,
+          "Compaction error: %s", status.ToString().c_str());
+      if (options_.paranoid_checks && bg_error_.ok()) {
+        bg_error_ = status;
+      }
+      break;
+    }
+  }
+  Log(options_.info_log, "Optimistic compaction ended after %ld iterations", iters);
+  return Status::OK();
 }
 
 void DBImpl::CleanupCompaction(CompactionState* compact) {

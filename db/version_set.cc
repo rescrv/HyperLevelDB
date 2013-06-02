@@ -1279,6 +1279,10 @@ Compaction* VersionSet::PickCompaction(int level) {
   assert(0 <= level && level < config::kNumLevels);
   bool trivial = false;
 
+  if (current_->files_[level].empty()) {
+    return NULL;
+  }
+
   Compaction* c = new Compaction(level);
   c->input_version_ = current_;
   c->input_version_->Ref();
@@ -1332,11 +1336,12 @@ Compaction* VersionSet::PickCompaction(int level) {
       c->SetRatio(1.0);
     // If the best we could do would be wasteful and the best level has more
     // data in it than the next level would have, move it all
-    } else if (best_ratio >= 0.0 &&
+    } else if (level < 4 && best_ratio >= 0.0 &&
                LA_sizes.back() * best_ratio >= LB_sizes.back()) {
       for (size_t i = 0 ; i < LA.size(); ++i) {
         c->inputs_[0].push_back(LA[i]);
       }
+      c->SetRatio(double(LA_sizes.back()) / double(LB_sizes.back()));
     // otherwise go with the best ratio
     } else if (best_ratio >= 0.0) {
       for (size_t i = best_idx_start; i < best_idx_limit; ++i) {

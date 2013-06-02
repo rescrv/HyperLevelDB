@@ -103,11 +103,16 @@ class DBImpl : public DB {
   { reinterpret_cast<DBImpl*>(db)->CompactLevelThread(); }
   void CompactLevelThread();
   Status BackgroundCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+  static void CompactOptimisticWrapper(void* db)
+  { reinterpret_cast<DBImpl*>(db)->CompactOptimisticThread(); }
+  void CompactOptimisticThread();
+  Status OptimisticCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
   void CleanupCompaction(CompactionState* compact)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   Status DoCompactionWork(CompactionState* compact)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-
   Status OpenCompactionOutputFile(CompactionState* compact);
   Status FinishCompactionOutputFile(CompactionState* compact, Iterator* input);
   Status InstallCompactionResults(CompactionState* compact)
@@ -154,11 +159,13 @@ class DBImpl : public DB {
   // Tell the foreground that background has done something of note
   port::CondVar bg_fg_cv_;
   // Communicate with compaction background thread
-  int bg_compaction_scheduled_;
   port::CondVar bg_compaction_cv_;
   // Communicate with memtable->L0 background thread
   port::CondVar bg_memtable_cv_;
-  // Mutual exlusion protecting hte LogAndApply func
+  // Communicate with the optimistic background thread
+  bool bg_optimistic_trip_;
+  port::CondVar bg_optimistic_cv_;
+  // Mutual exlusion protecting the LogAndApply func
   port::CondVar bg_log_cv_;
   bool bg_log_occupied_;
 
