@@ -176,7 +176,7 @@ worker_thread(leveldb::DB* db,
         std::string tmp;
         leveldb::ReadOptions ropts;
         leveldb::Status rst = db->Get(ropts, leveldb::Slice(k.data(), k.size()), &tmp);
-        assert(rst.ok() || rst.NotFound());
+        assert(rst.ok() || rst.IsNotFound());
 
         // issue a "put"
         leveldb::WriteOptions wopts;
