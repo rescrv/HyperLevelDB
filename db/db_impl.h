@@ -143,9 +143,9 @@ class DBImpl : public DB {
   uint64_t logfile_number_;
   log::Writer* log_;
 
-  // Queue of writers.
-  port::AtomicPointer writers_;
-  Writer* writers_end_;
+  // Synchronize writers
+  uint64_t __attribute__ ((aligned (8))) writers_lower_;
+  uint64_t __attribute__ ((aligned (8))) writers_upper_;
 
   SnapshotList snapshots_;
 

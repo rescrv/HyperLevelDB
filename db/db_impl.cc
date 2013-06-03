@@ -116,8 +116,8 @@ DBImpl::DBImpl(const Options& options, const std::string& dbname)
       logfile_(NULL),
       logfile_number_(0),
       log_(NULL),
-      writers_(NULL),
-      writers_end_(NULL),
+      writers_lower_(0),
+      writers_upper_(0),
       bg_fg_cv_(&mutex_),
       allow_background_activity_(false),
       num_bg_threads_(0),
@@ -1401,32 +1401,14 @@ Status DBImpl::SequenceWriteBegin(Writer* w, WriteBatch* updates) {
   if (s.ok()) {
     w->linked = true;
     w->next = NULL;
-    uint64_t last_sequence = 0;
-    if (writers_end_) {
-      last_sequence = writers_end_->end_sequence;
-    } else {
-      last_sequence = versions_->LastSequence();
-    }
-    w->start_sequence = last_sequence + 1;
-    if (updates) {
-      w->end_sequence = last_sequence + WriteBatchInternal::Count(updates);
-    } else {
-      w->end_sequence = last_sequence;
-    }
-
+    uint64_t diff = updates ? WriteBatchInternal::Count(updates) : 0;
+    uint64_t ticket = __sync_add_and_fetch(&writers_upper_, 1 + diff);
+    w->start_sequence = ticket - diff;
+    w->end_sequence = ticket;
     w->logfile = logfile_;
     w->log = log_;
     w->mem = mem_;
     w->mem->Ref();
-
-    if (writers_end_) {
-      writers_end_->next = w;
-      writers_end_ = w;
-    } else {
-      assert(!writers_.NoBarrier_Load());
-      writers_end_ = w;
-      writers_.Release_Store(w);
-    }
   }
 
   return s;
@@ -1438,30 +1420,17 @@ void DBImpl::SequenceWriteEnd(Writer* w) {
   }
 
   // wait until we are next
-  {
-    MutexLock l(&w->mtx);
-    while (writers_.NoBarrier_Load() != w) {
-      w->cv.Wait();
-    }
-  }
+  while (__sync_fetch_and_add(&writers_lower_, 0) < w->start_sequence)
+    ;
 
   // swizzle state to make ours visible
   {
     MutexLock l(&mutex_);
     versions_->SetLastSequence(w->end_sequence);
-    if (!w->next) {
-      writers_end_ = NULL;
-      writers_.Release_Store(w->next);
-    }
   }
 
   // signal the next writer
-  if (w->next) {
-    MutexLock l(&w->next->mtx);
-    // no need to touch writers_end_
-    writers_.Release_Store(w->next);
-    w->next->cv.Signal();
-  }
+  __sync_fetch_and_add(&writers_lower_, 1 + w->end_sequence - w->start_sequence);
 
   // must do in order: log, logfile
   if (w->old_log) {
@@ -1609,6 +1578,8 @@ Status DB::Open(const Options& options, const std::string& dbname,
   } else {
     delete impl;
   }
+  impl->writers_upper_ = impl->versions_->LastSequence();
+  impl->writers_lower_ = impl->writers_upper_ + 1;
   return s;
 }
 
