@@ -788,7 +788,7 @@ void DBImpl::CompactOptimisticThread() {
     bg_optimistic_trip_ = false;
     Status s = OptimisticCompaction();
 
-    if (!shutting_down_.Acquire_Load() && !s.ok())
+    if (!shutting_down_.Acquire_Load() && !s.ok()) {
       // Wait a little bit before retrying background compaction in
       // case this is an environmental problem and we do not want to
       // chew up resources for failed compactions for the duration of
@@ -798,6 +798,7 @@ void DBImpl::CompactOptimisticThread() {
       mutex_.Unlock();
       env_->SleepForMicroseconds(1000000);
       mutex_.Lock();
+    }
   }
   Log(options_.info_log, "cleaning up OptimisticCompactThread");
   num_bg_threads_ -= 1;
