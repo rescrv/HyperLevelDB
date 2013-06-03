@@ -24,13 +24,15 @@ class MemTable {
   explicit MemTable(const InternalKeyComparator& comparator);
 
   // Increase reference count.
-  void Ref() { ++refs_; }
+  // XXX use a release increment if not using GCC intrinsics
+  void Ref() { __sync_add_and_fetch(&refs_, 1); }
 
   // Drop reference count.  Delete if no more references exist.
+  // XXX use an acquire decrement if not using GCC intrinsics
   void Unref() {
-    --refs_;
-    assert(refs_ >= 0);
-    if (refs_ <= 0) {
+    int refs = __sync_sub_and_fetch(&refs_, 1);
+    assert(refs >= 0);
+    if (refs <= 0) {
       delete this;
     }
   }

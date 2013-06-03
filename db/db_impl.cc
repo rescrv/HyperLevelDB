@@ -1448,9 +1448,6 @@ void DBImpl::SequenceWriteEnd(Writer* w) {
   // swizzle state to make ours visible
   {
     MutexLock l(&mutex_);
-    if (w->mem) {
-      w->mem->Unref();
-    }
     versions_->SetLastSequence(w->end_sequence);
     if (!w->next) {
       writers_end_ = NULL;
@@ -1472,6 +1469,11 @@ void DBImpl::SequenceWriteEnd(Writer* w) {
     delete w->old_log;
     delete w->old_logfile;
     bg_memtable_cv_.Signal();
+  }
+
+  // safe because Unref is synchronized internally
+  if (w->mem) {
+    w->mem->Unref();
   }
 }
 
