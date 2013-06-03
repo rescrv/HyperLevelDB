@@ -1275,6 +1275,7 @@ Status DBImpl::Delete(const WriteOptions& options, const Slice& key) {
 
 // Information kept for every waiting writer
 struct DBImpl::Writer {
+  port::Mutex mtx;
   port::CondVar cv;
   bool linked;
   Writer* next;
@@ -1286,8 +1287,9 @@ struct DBImpl::Writer {
   WritableFile* old_logfile;
   log::Writer* old_log;
 
-  explicit Writer(port::Mutex* mtx)
-    : cv(mtx),
+  explicit Writer()
+    : mtx(),
+      cv(&mtx),
       linked(false),
       next(NULL),
       start_sequence(0),
@@ -1303,7 +1305,7 @@ struct DBImpl::Writer {
 };
 
 Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
-  Writer w(&mutex_);
+  Writer w;
   Status s;
   s = SequenceWriteBegin(&w, updates);
 
@@ -1421,9 +1423,9 @@ Status DBImpl::SequenceWriteBegin(Writer* w, WriteBatch* updates) {
       writers_end_->next = w;
       writers_end_ = w;
     } else {
-      assert(!writers_);
-      writers_ = w;
+      assert(!writers_.NoBarrier_Load());
       writers_end_ = w;
+      writers_.Release_Store(w);
     }
   }
 
@@ -1435,20 +1437,34 @@ void DBImpl::SequenceWriteEnd(Writer* w) {
     return;
   }
 
-  MutexLock l(&mutex_);
-
-  while (writers_ != w) {
-    w->cv.Wait();
+  // wait until we are next
+  {
+    MutexLock l(&w->mtx);
+    while (writers_.NoBarrier_Load() != w) {
+      w->cv.Wait();
+    }
   }
 
-  writers_ = writers_->next;
-  if (writers_ == NULL) {
-    writers_end_ = NULL;
-  } else {
-    writers_->cv.Signal();
+  // swizzle state to make ours visible
+  {
+    MutexLock l(&mutex_);
+    if (w->mem) {
+      w->mem->Unref();
+    }
+    versions_->SetLastSequence(w->end_sequence);
+    if (!w->next) {
+      writers_end_ = NULL;
+      writers_.Release_Store(w->next);
+    }
   }
 
-  versions_->SetLastSequence(w->end_sequence);
+  // signal the next writer
+  if (w->next) {
+    MutexLock l(&w->next->mtx);
+    // no need to touch writers_end_
+    writers_.Release_Store(w->next);
+    w->next->cv.Signal();
+  }
 
   // must do in order: log, logfile
   if (w->old_log) {
@@ -1456,10 +1472,6 @@ void DBImpl::SequenceWriteEnd(Writer* w) {
     delete w->old_log;
     delete w->old_logfile;
     bg_memtable_cv_.Signal();
-  }
-
-  if (w->mem) {
-    w->mem->Unref();
   }
 }
 

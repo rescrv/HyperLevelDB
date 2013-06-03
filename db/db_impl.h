@@ -144,7 +144,7 @@ class DBImpl : public DB {
   log::Writer* log_;
 
   // Queue of writers.
-  Writer* writers_;
+  port::AtomicPointer writers_;
   Writer* writers_end_;
 
   SnapshotList snapshots_;
