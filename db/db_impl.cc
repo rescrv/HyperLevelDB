@@ -134,7 +134,8 @@ DBImpl::DBImpl(const Options& options, const std::string& dbname)
   env_->StartThread(&DBImpl::CompactMemTableWrapper, this);
   env_->StartThread(&DBImpl::CompactOptimisticWrapper, this);
   env_->StartThread(&DBImpl::CompactLevelWrapper, this);
-  num_bg_threads_ = 3;
+  env_->StartThread(&DBImpl::CompactLevelWrapper, this);
+  num_bg_threads_ = 4; // change comparison to num_bg_threads_ below if this is not 4
 
   // Reserve ten files or so for other uses and give the rest to TableCache.
   const int table_cache_size = options.max_open_files - 10;
@@ -654,8 +655,15 @@ void DBImpl::CompactLevelThread() {
     if (shutting_down_.Acquire_Load()) {
       break;
     }
-    assert(manual_compaction_ == NULL || num_bg_threads_ == 3);
 
+    if (manual_compaction_ && num_bg_threads_ > 3) {
+      Log(options_.info_log, "exiting excess CompactLevelThread");
+      num_bg_threads_ -= 1;
+      bg_compaction_cv_.Signal();
+      return;
+    }
+
+    assert(manual_compaction_ == NULL || num_bg_threads_ == 3);
     Status s = BackgroundCompaction();
     bg_fg_cv_.SignalAll(); // before the backoff In case a waiter 
                            // can proceed despite the error
@@ -1351,6 +1359,7 @@ Status DBImpl::SequenceWriteBegin(Writer* w, WriteBatch* updates) {
       // individual write by 1ms to reduce latency variance.  Also,
       // this delay hands over some CPU to the compaction thread in
       // case it is sharing the same core as the writer.
+      bg_compaction_cv_.Signal();
       mutex_.Unlock();
       env_->SleepForMicroseconds(1000);
       allow_delay = false;  // Do not delay a single write more than once
@@ -1564,12 +1573,14 @@ Status DB::Open(const Options& options, const std::string& dbname,
     }
     if (s.ok()) {
       impl->DeleteObsoleteFiles();
+      impl->bg_optimistic_cv_.Signal();
       impl->bg_compaction_cv_.Signal();
       impl->bg_memtable_cv_.Signal();
     }
   }
   impl->pending_outputs_.clear();
   impl->allow_background_activity_ = true;
+  impl->bg_optimistic_cv_.SignalAll();
   impl->bg_compaction_cv_.SignalAll();
   impl->bg_memtable_cv_.SignalAll();
   impl->mutex_.Unlock();
