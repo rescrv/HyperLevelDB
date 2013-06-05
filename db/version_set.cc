@@ -24,7 +24,7 @@ namespace leveldb {
 static double MaxBytesForLevel(int level) {
   assert(level < leveldb::config::kNumLevels);
   static const double bytes[] = {10 * 1048576.0,
-                                 10 * 1048576.0,
+                                 100 * 1048576.0,
                                  100 * 1048576.0,
                                  1000 * 1048576.0,
                                  10000 * 1048576.0,
