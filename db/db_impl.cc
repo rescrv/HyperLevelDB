@@ -822,7 +822,7 @@ Status DBImpl::OptimisticCompaction() {
     ++iters;
     did_compaction = false;
     Compaction* c = NULL;
-    for (size_t level = 0; level + 1 < config::kNumLevels; ++level) {
+    for (size_t level = 1; level + 1 < config::kNumLevels; ++level) {
       if (levels_locked_[level] || levels_locked_[level + 1]) {
         continue;
       }
