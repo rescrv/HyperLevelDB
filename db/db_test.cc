@@ -915,10 +915,10 @@ TEST(DBTest, CompactionsGenerateMultipleFiles) {
 
   Random rnd(301);
 
-  // Write 8MB (80 values, each 100K)
+  // Write 32MB (320 values, each 100K)
   ASSERT_EQ(NumTableFilesAtLevel(0), 0);
   std::vector<std::string> values;
-  for (int i = 0; i < 80; i++) {
+  for (int i = 0; i < 320; i++) {
     values.push_back(RandomString(&rnd, 100000));
     ASSERT_OK(Put(Key(i), values[i]));
   }
@@ -929,7 +929,7 @@ TEST(DBTest, CompactionsGenerateMultipleFiles) {
 
   ASSERT_EQ(NumTableFilesAtLevel(0), 0);
   ASSERT_GT(NumTableFilesAtLevel(1), 1);
-  for (int i = 0; i < 80; i++) {
+  for (int i = 0; i < 320; i++) {
     ASSERT_EQ(Get(Key(i)), values[i]);
   }
 }
