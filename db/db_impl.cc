@@ -134,8 +134,7 @@ DBImpl::DBImpl(const Options& options, const std::string& dbname)
   env_->StartThread(&DBImpl::CompactMemTableWrapper, this);
   env_->StartThread(&DBImpl::CompactOptimisticWrapper, this);
   env_->StartThread(&DBImpl::CompactLevelWrapper, this);
-  env_->StartThread(&DBImpl::CompactLevelWrapper, this);
-  num_bg_threads_ = 4; // change comparison to num_bg_threads_ below if this is not 4
+  num_bg_threads_ = 3;
 
   // Reserve ten files or so for other uses and give the rest to TableCache.
   const int table_cache_size = options.max_open_files - 10;
@@ -654,13 +653,6 @@ void DBImpl::CompactLevelThread() {
     }
     if (shutting_down_.Acquire_Load()) {
       break;
-    }
-
-    if (manual_compaction_ && num_bg_threads_ > 3) {
-      Log(options_.info_log, "exiting excess CompactLevelThread");
-      num_bg_threads_ -= 1;
-      bg_compaction_cv_.Signal();
-      return;
     }
 
     assert(manual_compaction_ == NULL || num_bg_threads_ == 3);
