@@ -1342,20 +1342,6 @@ Status DBImpl::SequenceWriteBegin(Writer* w, WriteBatch* updates) {
       // Yield previous error
       s = bg_error_;
       break;
-    } else if (
-        allow_delay &&
-        versions_->NumLevelFiles(0) >= config::kL0_SlowdownWritesTrigger) {
-      // We are getting close to hitting a hard limit on the number of
-      // L0 files.  Rather than delaying a single write by several
-      // seconds when we hit the hard limit, start delaying each
-      // individual write by 1ms to reduce latency variance.  Also,
-      // this delay hands over some CPU to the compaction thread in
-      // case it is sharing the same core as the writer.
-      bg_compaction_cv_.Signal();
-      mutex_.Unlock();
-      env_->SleepForMicroseconds(1000);
-      allow_delay = false;  // Do not delay a single write more than once
-      mutex_.Lock();
     } else if (!force &&
                (mem_->ApproximateMemoryUsage() <= options_.write_buffer_size)) {
       // There is room in current memtable
@@ -1365,12 +1351,6 @@ Status DBImpl::SequenceWriteBegin(Writer* w, WriteBatch* updates) {
     } else if (imm_ != NULL) {
       // We have filled up the current memtable, but the previous
       // one is still being compacted, so we wait.
-      bg_compaction_cv_.Signal();
-      bg_memtable_cv_.Signal();
-      bg_fg_cv_.Wait();
-    } else if (versions_->NumLevelFiles(0) >= config::kL0_StopWritesTrigger) {
-      // There are too many level-0 files.
-      Log(options_.info_log, "waiting...\n");
       bg_compaction_cv_.Signal();
       bg_memtable_cv_.Signal();
       bg_fg_cv_.Wait();
