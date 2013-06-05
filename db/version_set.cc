@@ -1275,6 +1275,10 @@ int VersionSet::PickCompactionLevel(bool* locked) {
   return level;
 }
 
+static bool OldestFirst(FileMetaData* a, FileMetaData* b) {
+  return a->number < b->number;
+}
+
 Compaction* VersionSet::PickCompaction(int level) {
   assert(0 <= level && level < config::kNumLevels);
   bool trivial = false;
@@ -1375,8 +1379,10 @@ Compaction* VersionSet::PickCompaction(int level) {
       }
     }
   } else {
-    for (size_t i = 0; i < current_->files_[0].size(); ++i) {
-      c->inputs_[0].push_back(current_->files_[0][i]);
+    std::vector<FileMetaData*> tmp(current_->files_[0]);
+    std::sort(tmp.begin(), tmp.end(), OldestFirst);
+    for (size_t i = 0; i < tmp.size() && c->inputs_[0].size() < 32; ++i) {
+        c->inputs_[0].push_back(tmp[i]);
     }
   }
 
