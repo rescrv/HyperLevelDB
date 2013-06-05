@@ -47,13 +47,13 @@ static uint64_t MaxFileSizeForLevel(int level) {
 
 static uint64_t MaxCompactionBytesForLevel(int level) {
   assert(level < leveldb::config::kNumLevels);
-  static const uint64_t bytes[] = {64 * 1048576,
-                                   64 * 1048576,
-                                   64 * 1048576,
-                                   64 * 1048576,
+  static const uint64_t bytes[] = {128 * 1048576,
+                                   128 * 1048576,
                                    128 * 1048576,
                                    256 * 1048576,
-                                   512 * 1048576};
+                                   256 * 1048576,
+                                   256 * 1048576,
+                                   256 * 1048576};
   return bytes[level];
 }
 
