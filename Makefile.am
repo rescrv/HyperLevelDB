@@ -240,3 +240,6 @@ version_set_test_LDADD = libhyperleveldb.la -lpthread
 
 write_batch_test_SOURCES = db/write_batch_test.cc $(TESTHARNESS)
 write_batch_test_LDADD = libhyperleveldb.la -lpthread
+
+issue178_test_SOURCES = issues/issue178_test.cc $(TESTHARNESS)
+issue178_test_LDADD = libhyperleveldb.la -lpthread
