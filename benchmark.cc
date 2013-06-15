@@ -47,6 +47,9 @@
 // armnod
 #include <armnod.h>
 
+// numbers
+#include <numbers.h>
+
 static long _done = 0;
 static long _number = 1000000;
 static long _threads = 1;
@@ -61,8 +64,9 @@ static struct poptOption _popts[] = {
 
 static void
 worker_thread(leveldb::DB*,
-              const armnod::argparser& _k,
-              const armnod::argparser& _v);
+              numbers::throughput_latency_logger* tll,
+              const armnod::argparser& k,
+              const armnod::argparser& v);
 
 int
 main(int argc, const char* argv[])
@@ -104,15 +108,22 @@ main(int argc, const char* argv[])
 
     leveldb::Options opts;
     opts.create_if_missing = true;
-    opts.write_buffer_size = 16ULL * 1024ULL * 1024ULL;
+    opts.write_buffer_size = 64ULL * 1024ULL * 1024ULL;
     opts.filter_policy = leveldb::NewBloomFilterPolicy(10);
-    //opts.block_cache = leveldb::NewLRUCache(64ULL * 1024ULL * 1024ULL);
     leveldb::DB* db;
-    leveldb::Status st = leveldb::DB::Open(opts, ".", &db);
+    leveldb::Status st = leveldb::DB::Open(opts, "tmp", &db);
 
     if (!st.ok())
     {
         std::cerr << "could not open LevelDB: " << st.ToString() << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    numbers::throughput_latency_logger tll;
+
+    if (!tll.open("benchmark.log"))
+    {
+        std::cerr << "could not open log: " << strerror(errno) << std::endl;
         return EXIT_FAILURE;
     }
 
@@ -121,7 +132,7 @@ main(int argc, const char* argv[])
 
     for (size_t i = 0; i < _threads; ++i)
     {
-        thread_ptr t(new po6::threads::thread(std::tr1::bind(worker_thread, db, key_parser, value_parser)));
+        thread_ptr t(new po6::threads::thread(std::tr1::bind(worker_thread, db, &tll, key_parser, value_parser)));
         threads.push_back(t);
         t->start();
     }
@@ -134,6 +145,13 @@ main(int argc, const char* argv[])
     std::string tmp;
     if (db->GetProperty("leveldb.stats", &tmp)) std::cout << tmp << std::endl;
     delete db;
+
+    if (!tll.close())
+    {
+        std::cerr << "could not close log: " << strerror(errno) << std::endl;
+        return EXIT_FAILURE;
+    }
+
     return EXIT_SUCCESS;
 }
 
@@ -159,6 +177,7 @@ get_random()
 
 void
 worker_thread(leveldb::DB* db,
+              numbers::throughput_latency_logger* tll,
               const armnod::argparser& _k,
               const armnod::argparser& _v)
 {
@@ -166,6 +185,8 @@ worker_thread(leveldb::DB* db,
     armnod::generator val(armnod::argparser(_v).config());
     key.seed(get_random());
     val.seed(get_random());
+    numbers::throughput_latency_logger::thread_state ts;
+    tll->initialize_thread(&ts);
 
     while (__sync_fetch_and_add(&_done, 1) < _number)
     {
@@ -181,7 +202,11 @@ worker_thread(leveldb::DB* db,
         // issue a "put"
         leveldb::WriteOptions wopts;
         wopts.sync = false;
+        tll->start(&ts, 0);
         leveldb::Status wst = db->Put(wopts, leveldb::Slice(k.data(), k.size()), leveldb::Slice(v.data(), v.size()));
+        tll->finish(&ts);
         assert(wst.ok());
     }
+
+    tll->terminate_thread(&ts);
 }
