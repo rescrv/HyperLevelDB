@@ -3,8 +3,8 @@
 #include <sstream>
 #include <cstdlib>
 
-#include "leveldb/db.h"
-#include "leveldb/write_batch.h"
+#include "hyperleveldb/db.h"
+#include "hyperleveldb/write_batch.h"
 #include "util/testharness.h"
 
 namespace {
