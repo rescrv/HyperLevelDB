@@ -21,6 +21,7 @@ db_bench
 depcomp
 install-sh
 leveldbutil
+libhyperleveldb.pc
 libtool
 ltmain.sh
 m4/

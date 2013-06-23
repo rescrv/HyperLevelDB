@@ -30,6 +30,9 @@ AM_CFLAGS = -DLEVELDB_PLATFORM_POSIX -fno-builtin-memcmp -fno-builtin-memmove
 AM_CXXFLAGS = -DLEVELDB_PLATFORM_POSIX -fno-builtin-memcmp -fno-builtin-memmove
 AM_MAKEFLAGS = --no-print-directory
 
+pkgconfigdir = $(libdir)/pkgconfig
+pkgconfig_DATA = libhyperleveldb.pc
+
 EXTRA_DIST =
 EXTRA_DIST += AUTHORS
 EXTRA_DIST += LICENSE

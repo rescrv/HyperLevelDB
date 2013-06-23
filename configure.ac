@@ -59,5 +59,5 @@ AC_CHECK_FUNCS([alarm clock_gettime mach_absolute_time ftruncate memmove mkdir m
 
 # Optional components
 
-AC_CONFIG_FILES([Makefile])
+AC_CONFIG_FILES([Makefile libhyperleveldb.pc])
 AC_OUTPUT
