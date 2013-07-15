@@ -208,7 +208,7 @@ class VersionSet {
   // Returns NULL if there is no compaction to be done.
   // Otherwise returns a pointer to a heap-allocated object that
   // describes the compaction.  Caller should delete the result.
-  Compaction* PickCompaction(int level);
+  Compaction* PickCompaction(Version* v, int level);
 
   // Return a compaction object for compacting the range [begin,end] in
   // the specified level.  Returns NULL if there is nothing in that
@@ -273,7 +273,8 @@ class VersionSet {
                  InternalKey* smallest,
                  InternalKey* largest);
 
-  void GetCompactionBoundaries(int level,
+  void GetCompactionBoundaries(Version* version,
+                               int level,
                                std::vector<FileMetaData*>* LA,
                                std::vector<FileMetaData*>* LB,
                                std::vector<uint64_t>* LA_sizes,

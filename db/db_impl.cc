@@ -711,7 +711,7 @@ Status DBImpl::BackgroundCompaction() {
   } else {
     int level = versions_->PickCompactionLevel(levels_locked_);
     if (level != config::kNumLevels) {
-      c = versions_->PickCompaction(level);
+      c = versions_->PickCompaction(versions_->current(), level);
     }
     if (c) {
       assert(!levels_locked_[c->level() + 0]);
@@ -831,7 +831,7 @@ Status DBImpl::OptimisticCompaction() {
       if (levels_locked_[level] || levels_locked_[level + 1]) {
         continue;
       }
-      Compaction* tmp = versions_->PickCompaction(level);
+      Compaction* tmp = versions_->PickCompaction(versions_->current(), level);
       if (tmp && tmp->IsTrivialMove()) {
         if (c) {
           delete c;
