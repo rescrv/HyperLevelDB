@@ -42,7 +42,7 @@
 #include <po6/threads/thread.h>
 
 // e
-#include <e/guard.h>
+#include <e/popt.h>
 
 // armnod
 #include <armnod.h>
@@ -50,60 +50,45 @@
 // numbers
 #include <numbers.h>
 
-static long _done = 0;
-static long _number = 1000000;
-static long _threads = 1;
-
-static struct poptOption _popts[] = {
-    {"number", 'n', POPT_ARG_LONG, &_number, 0,
-     "perform N operations against the database (default: 1000000)", "N"},
-    {"threads", 't', POPT_ARG_LONG, &_threads, 0,
-     "run the test with T concurrent threads (default: 1)", "T"},
-    POPT_TABLEEND
-};
-
 static void
 worker_thread(leveldb::DB*,
               numbers::throughput_latency_logger* tll,
               const armnod::argparser& k,
               const armnod::argparser& v);
 
+static long _done = 0;
+static long _number = 1000000;
+static long _threads = 1;
+static const char* _output = "benchmark.log";
+static const char* _dir = ".";
+
 int
 main(int argc, const char* argv[])
 {
+    e::argparser ap;
+    ap.autohelp();
+    ap.arg().name('n', "number")
+            .description("perform N operations against the database (default: 1000000)")
+            .metavar("N")
+            .as_long(&_number);
+    ap.arg().name('t', "threads")
+            .description("run the test with T concurrent threads (default: 1)")
+            .metavar("T")
+            .as_long(&_threads);
+    ap.arg().name('o', "output")
+            .description("output file for benchmark results (default: benchmark.log)")
+            .as_string(&_output);
+    ap.arg().name('d', "db-dir")
+            .description("directory for leveldb storage (default: .)")
+            .as_string(&_dir);
     armnod::argparser key_parser("key-");
     armnod::argparser value_parser("value-");
-    std::vector<poptOption> popts;
-    poptOption s[] = {POPT_AUTOHELP {NULL, 0, POPT_ARG_INCLUDE_TABLE, _popts, 0, "Benchmark:", NULL}, POPT_TABLEEND};
-    popts.push_back(s[0]);
-    popts.push_back(s[1]);
-    popts.push_back(key_parser.options("Key Generation:"));
-    popts.push_back(value_parser.options("Value Generation:"));
-    popts.push_back(s[2]);
-    poptContext poptcon;
-    poptcon = poptGetContext(NULL, argc, argv, &popts.front(), POPT_CONTEXT_POSIXMEHARDER);
-    e::guard g = e::makeguard(poptFreeContext, poptcon); g.use_variable();
-    poptSetOtherOptionHelp(poptcon, "[OPTIONS]");
+    ap.add("Key Generation:", key_parser.parser());
+    ap.add("Value Generation:", value_parser.parser());
 
-    int rc;
-
-    while ((rc = poptGetNextOpt(poptcon)) != -1)
+    if (!ap.parse(argc, argv))
     {
-        switch (rc)
-        {
-            case POPT_ERROR_NOARG:
-            case POPT_ERROR_BADOPT:
-            case POPT_ERROR_BADNUMBER:
-            case POPT_ERROR_OVERFLOW:
-                std::cerr << poptStrerror(rc) << " " << poptBadOption(poptcon, 0) << std::endl;
-                return EXIT_FAILURE;
-            case POPT_ERROR_OPTSTOODEEP:
-            case POPT_ERROR_BADQUOTE:
-            case POPT_ERROR_ERRNO:
-            default:
-                std::cerr << "logic error in argument parsing" << std::endl;
-                return EXIT_FAILURE;
-        }
+        return EXIT_FAILURE;
     }
 
     leveldb::Options opts;
@@ -121,7 +106,7 @@ main(int argc, const char* argv[])
 
     numbers::throughput_latency_logger tll;
 
-    if (!tll.open("benchmark.log"))
+    if (!tll.open(_output))
     {
         std::cerr << "could not open log: " << strerror(errno) << std::endl;
         return EXIT_FAILURE;
@@ -196,13 +181,15 @@ worker_thread(leveldb::DB* db,
         // issue a "get"
         std::string tmp;
         leveldb::ReadOptions ropts;
+        tll->start(&ts, 1);
         leveldb::Status rst = db->Get(ropts, leveldb::Slice(k.data(), k.size()), &tmp);
+        tll->finish(&ts);
         assert(rst.ok() || rst.IsNotFound());
 
         // issue a "put"
         leveldb::WriteOptions wopts;
         wopts.sync = false;
-        tll->start(&ts, 0);
+        tll->start(&ts, 2);
         leveldb::Status wst = db->Put(wopts, leveldb::Slice(k.data(), k.size()), leveldb::Slice(v.data(), v.size()));
         tll->finish(&ts);
         assert(wst.ok());
