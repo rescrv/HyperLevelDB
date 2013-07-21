@@ -115,9 +115,9 @@ DBImpl::DBImpl(const Options& options, const std::string& dbname)
       shutting_down_(NULL),
       mem_(new MemTable(internal_comparator_)),
       imm_(NULL),
-      logfile_(NULL),
+      logfile_(),
       logfile_number_(0),
-      log_(NULL),
+      log_(),
       writers_lower_(0),
       writers_upper_(0),
       bg_fg_cv_(&mutex_),
@@ -170,8 +170,8 @@ DBImpl::~DBImpl() {
   delete versions_;
   if (mem_ != NULL) mem_->Unref();
   if (imm_ != NULL) imm_->Unref();
-  delete log_;
-  delete logfile_;
+  log_.reset();
+  logfile_.reset();
   delete table_cache_;
 
   if (owns_info_log_) {
@@ -1294,11 +1294,11 @@ struct DBImpl::Writer {
   Writer* next;
   uint64_t start_sequence;
   uint64_t end_sequence;
-  WritableFile* logfile;
-  log::Writer* log;
+  std::tr1::shared_ptr<WritableFile> logfile;
+  std::tr1::shared_ptr<log::Writer> log;
   MemTable* mem;
-  WritableFile* old_logfile;
-  log::Writer* old_log;
+  std::tr1::shared_ptr<WritableFile> old_logfile;
+  std::tr1::shared_ptr<log::Writer> old_log;
 
   explicit Writer()
     : mtx(),
@@ -1307,11 +1307,11 @@ struct DBImpl::Writer {
       next(NULL),
       start_sequence(0),
       end_sequence(0),
-      logfile(NULL),
-      log(NULL),
+      logfile(),
+      log(),
       mem(NULL),
-      old_logfile(NULL),
-      old_log(NULL) {
+      old_logfile(),
+      old_log() {
   }
   ~Writer() throw () {
   }
@@ -1347,8 +1347,8 @@ Status DBImpl::SequenceWriteBegin(Writer* w, WriteBatch* updates) {
   MutexLock l(&mutex_);
   bool force = updates == NULL;
   bool allow_delay = !force;
-  w->old_log = NULL;
-  w->old_logfile = NULL;
+  w->old_log.reset();
+  w->old_logfile.reset();
 
   while (true) {
     if (!bg_error_.ok()) {
@@ -1380,9 +1380,9 @@ Status DBImpl::SequenceWriteBegin(Writer* w, WriteBatch* updates) {
       }
       w->old_log = log_;
       w->old_logfile = logfile_;
-      logfile_ = lfile;
+      logfile_.reset(lfile);
       logfile_number_ = new_log_number;
-      log_ = new log::Writer(lfile);
+      log_.reset(new log::Writer(lfile));
       imm_ = mem_;
       has_imm_.Release_Store(imm_);
       mem_ = new MemTable(internal_comparator_);
@@ -1429,8 +1429,8 @@ void DBImpl::SequenceWriteEnd(Writer* w) {
   // must do in order: log, logfile
   if (w->old_log) {
     assert(w->old_logfile);
-    delete w->old_log;
-    delete w->old_logfile;
+    w->old_log.reset();
+    w->old_logfile.reset();
     bg_memtable_cv_.Signal();
   }
 
@@ -1551,9 +1551,9 @@ Status DB::Open(const Options& options, const std::string& dbname,
                                      &lfile);
     if (s.ok()) {
       edit.SetLogNumber(new_log_number);
-      impl->logfile_ = lfile;
+      impl->logfile_.reset(lfile);
       impl->logfile_number_ = new_log_number;
-      impl->log_ = new log::Writer(lfile);
+      impl->log_.reset(new log::Writer(lfile));
       s = impl->versions_->LogAndApply(&edit, &impl->mutex_, &impl->bg_log_cv_, &impl->bg_log_occupied_);
     }
     if (s.ok()) {

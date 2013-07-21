@@ -7,6 +7,7 @@
 
 #include <deque>
 #include <set>
+#include <tr1/memory>
 #include "db/dbformat.h"
 #include "db/log_writer.h"
 #include "db/snapshot.h"
@@ -139,9 +140,9 @@ class DBImpl : public DB {
   MemTable* mem_;
   MemTable* imm_;                // Memtable being compacted
   port::AtomicPointer has_imm_;  // So bg thread can detect non-NULL imm_
-  WritableFile* logfile_;
+  std::tr1::shared_ptr<WritableFile> logfile_;
   uint64_t logfile_number_;
-  log::Writer* log_;
+  std::tr1::shared_ptr<log::Writer> log_;
 
   // Synchronize writers
   uint64_t __attribute__ ((aligned (8))) writers_lower_;
