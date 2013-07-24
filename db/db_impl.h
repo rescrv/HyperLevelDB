@@ -42,6 +42,7 @@ class DBImpl : public DB {
   virtual bool GetProperty(const Slice& property, std::string* value);
   virtual void GetApproximateSizes(const Range* range, int n, uint64_t* sizes);
   virtual void CompactRange(const Slice* begin, const Slice* end);
+  virtual Status LiveBackup(const Slice& name);
 
   // Extra methods (for testing) that are not in the public DB interface
 
@@ -181,6 +182,11 @@ class DBImpl : public DB {
   ManualCompaction* manual_compaction_;
 
   VersionSet* versions_;
+
+  // Information for ongoing backup processes
+  port::CondVar backup_cv_;
+  port::AtomicPointer backup_in_progress_; // non-NULL in progress
+  bool backup_deferred_delete_; // DeleteObsoleteFiles delayed by backup; protect with mutex_
 
   // Have we encountered a background error in paranoid mode?
   Status bg_error_;

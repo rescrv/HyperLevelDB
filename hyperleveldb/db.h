@@ -140,6 +140,13 @@ class DB {
   //    db->CompactRange(NULL, NULL);
   virtual void CompactRange(const Slice* begin, const Slice* end) = 0;
 
+  // Create a live backup of a live LevelDB instance.
+  // The backup is stored in a directory named "backup-<name>" under the top
+  // level of the open LevelDB database.  The implementation is permitted, and
+  // even encouraged, to improve the performance of this call through
+  // hard-links.
+  virtual Status LiveBackup(const Slice& name) = 0;
+
  private:
   // No copying allowed
   DB(const DB&);

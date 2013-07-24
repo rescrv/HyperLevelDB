@@ -504,6 +504,54 @@ class PosixEnv : public Env {
     return result;
   }
 
+  virtual Status CopyFile(const std::string& src, const std::string& target) {
+    Status result;
+    int fd1;
+    int fd2;
+
+    if (result.ok() && (fd1 = open(src.c_str(), O_RDONLY)) < 0) {
+      result = IOError(src, errno);
+    }
+    if (result.ok() && (fd2 = open(target.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644)) < 0) {
+      result = IOError(target, errno);
+    }
+
+    ssize_t amt = 0;
+    char buf[512];
+
+    while (result.ok() && (amt = read(fd1, buf, 512)) > 0) {
+      if (write(fd2, buf, amt) != amt) {
+        result = IOError(src, errno);
+      }
+    }
+
+    if (result.ok() && amt < 0) {
+      result = IOError(src, errno);
+    }
+
+    if (fd1 >= 0 && close(fd1) < 0) {
+      if (result.ok()) {
+        result = IOError(src, errno);
+      }
+    }
+
+    if (fd2 >= 0 && close(fd2) < 0) {
+      if (result.ok()) {
+        result = IOError(target, errno);
+      }
+    }
+
+    return result;
+  }
+
+  virtual Status LinkFile(const std::string& src, const std::string& target) {
+    Status result;
+    if (link(src.c_str(), target.c_str()) != 0) {
+      result = IOError(src, errno);
+    }
+    return result;
+  }
+
   virtual Status LockFile(const std::string& fname, FileLock** lock) {
     *lock = NULL;
     Status result;

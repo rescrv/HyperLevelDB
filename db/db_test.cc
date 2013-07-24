@@ -1828,6 +1828,8 @@ class ModelDB: public DB {
   }
   virtual void CompactRange(const Slice* start, const Slice* end) {
   }
+  virtual Status LiveBackup(const Slice& name) {
+  }
 
  private:
   class ModelIter: public Iterator {

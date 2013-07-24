@@ -43,12 +43,17 @@
 
 // e
 #include <e/popt.h>
+#include <e/time.h>
 
 // armnod
 #include <armnod.h>
 
 // numbers
 #include <numbers.h>
+
+static void
+backup_thread(leveldb::DB*,
+              numbers::throughput_latency_logger* tll);
 
 static void
 worker_thread(leveldb::DB*,
@@ -59,6 +64,7 @@ worker_thread(leveldb::DB*,
 static long _done = 0;
 static long _number = 1000000;
 static long _threads = 1;
+static long _backup = 0;
 static const char* _output = "benchmark.log";
 static const char* _dir = ".";
 
@@ -81,6 +87,9 @@ main(int argc, const char* argv[])
     ap.arg().name('d', "db-dir")
             .description("directory for leveldb storage (default: .)")
             .as_string(&_dir);
+    ap.arg().name('b', "backup")
+            .description("perform a live backup every N seconds (default: 0 (no backup))")
+            .as_long(&_backup);
     armnod::argparser key_parser("key-");
     armnod::argparser value_parser("value-");
     ap.add("Key Generation:", key_parser.parser());
@@ -114,6 +123,13 @@ main(int argc, const char* argv[])
 
     typedef std::tr1::shared_ptr<po6::threads::thread> thread_ptr;
     std::vector<thread_ptr> threads;
+
+    if (_backup > 0)
+    {
+        thread_ptr t(new po6::threads::thread(std::tr1::bind(backup_thread, db, &tll)));
+        threads.push_back(t);
+        t->start();
+    }
 
     for (size_t i = 0; i < _threads; ++i)
     {
@@ -158,6 +174,47 @@ get_random()
     }
 
     return ret;
+}
+
+#define BILLION (1000ULL * 1000ULL * 1000ULL)
+
+void
+backup_thread(leveldb::DB* db,
+              numbers::throughput_latency_logger* tll)
+{
+    uint64_t target = e::time() / BILLION;
+    target += _backup;
+    uint64_t idx = 0;
+    numbers::throughput_latency_logger::thread_state ts;
+    tll->initialize_thread(&ts);
+
+    while (__sync_fetch_and_add(&_done, 0) < _number)
+    {
+        uint64_t now = e::time() / BILLION;
+
+        if (now < target)
+        {
+            timespec ts;
+            ts.tv_sec = 0;
+            ts.tv_nsec = 250ULL * 1000ULL * 1000ULL;
+            nanosleep(&ts, NULL);
+        }
+        else
+        {
+            target = now + _backup;
+            char buf[32];
+            snprintf(buf, 32, "%05lu", idx);
+            buf[31] = '\0';
+            leveldb::Slice name(buf);
+            leveldb::Status st;
+
+            tll->start(&ts, 4);
+            st = db->LiveBackup(name);
+            tll->finish(&ts);
+            assert(st.ok());
+            ++idx;
+        }
+    }
 }
 
 void

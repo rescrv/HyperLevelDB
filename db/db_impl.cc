@@ -130,10 +130,14 @@ DBImpl::DBImpl(const Options& options, const std::string& dbname)
       bg_log_cv_(&mutex_),
       bg_log_occupied_(false),
       manual_compaction_(NULL),
+      backup_cv_(&mutex_),
+      backup_in_progress_(),
+      backup_deferred_delete_(),
       consecutive_compaction_errors_(0) {
   mutex_.Lock();
   mem_->Ref();
   has_imm_.Release_Store(NULL);
+  backup_in_progress_.Release_Store(NULL);
   env_->StartThread(&DBImpl::CompactMemTableWrapper, this);
   env_->StartThread(&DBImpl::CompactOptimisticWrapper, this);
   env_->StartThread(&DBImpl::CompactLevelWrapper, this);
@@ -224,6 +228,16 @@ void DBImpl::MaybeIgnoreError(Status* s) const {
 }
 
 void DBImpl::DeleteObsoleteFiles() {
+  // Defer if there's background activity
+  mutex_.AssertHeld();
+  if (backup_in_progress_.Acquire_Load() != NULL) {
+    backup_deferred_delete_ = true;
+    return;
+  }
+
+  // If you ever release mutex_ in this function, you'll need to do more work in
+  // LiveBackup
+
   // Make a set of all of the live files
   std::set<uint64_t> live = pending_outputs_;
   versions_->AddLiveFiles(&live);
@@ -1518,6 +1532,100 @@ void DBImpl::GetApproximateSizes(
     MutexLock l(&mutex_);
     v->Unref();
   }
+}
+
+Status DBImpl::LiveBackup(const Slice& name) {
+  std::set<uint64_t> live;
+  uint64_t ticket = __sync_add_and_fetch(&writers_upper_, 1);
+
+  while (__sync_fetch_and_add(&writers_lower_, 0) < ticket)
+    ;
+
+  {
+    MutexLock l(&mutex_);
+    versions_->SetLastSequence(ticket);
+    while (backup_in_progress_.Acquire_Load() != NULL) {
+      backup_cv_.Wait();
+    }
+    backup_in_progress_.Release_Store(this);
+    while (bg_log_occupied_) {
+      bg_log_cv_.Wait();
+    }
+    bg_log_occupied_ = true;
+    // note that this logic assumes that DeleteObsoleteFiles never releases
+    // mutex_, so that once we release at this brace, we'll guarantee that it
+    // will see backup_in_progress_.  If you change DeleteObsoleteFiles to
+    // release mutex_, you'll need to add some sort of synchronization in place
+    // of this text block.
+    versions_->AddLiveFiles(&live);
+    __sync_fetch_and_add(&writers_lower_, 1);
+  }
+
+  Status s;
+  std::vector<std::string> filenames;
+  s = env_->GetChildren(dbname_, &filenames);
+  std::string backup_dir = dbname_ + "/backup-" + name.ToString() + "/";
+
+  if (s.ok()) {
+    s = env_->CreateDir(backup_dir);
+  }
+
+  uint64_t number;
+  FileType type;
+
+  for (size_t i = 0; i < filenames.size(); i++) {
+    if (!s.ok()) {
+      continue;
+    }
+    if (ParseFileName(filenames[i], &number, &type)) {
+      std::string src = dbname_ + "/" + filenames[i];
+      std::string target = backup_dir + "/" + filenames[i];
+      switch (type) {
+        case kLogFile:
+        case kDescriptorFile:
+        case kCurrentFile:
+        case kInfoLogFile:
+          s = env_->CopyFile(src, target);
+          break;
+        case kTableFile:
+          // If it's a file referenced by a version, we have logged that version
+          // and applied it.  Our MANIFEST will reflect that, and the file
+          // number assigned to new files will be greater or equal, ensuring
+          // that they aren't overwritten.  Any file not in "live" either exists
+          // past the current manifest (output of ongoing compaction) or so far
+          // in the past we don't care (we're going to delete it at the end of
+          // this backup).  I'd rather play safe than sorry.
+          //
+          // Under no circumstances should you collapse this to a single
+          // LinkFile without the conditional as it has implications for backups
+          // that share hardlinks.  Opening an older backup that has files
+          // hardlinked with newer backups will overwrite "immutable" files in
+          // the newer backups because they aren't in our manifest, and we do an
+          // open/write rather than a creat/rename.  We avoid linking these
+          // files.
+          if (live.find(number) != live.end()) {
+            s = env_->LinkFile(src, target);
+          }
+          break;
+        case kTempFile:
+        case kDBLockFile:
+          break;
+      }
+    }
+  }
+
+  {
+    MutexLock l(&mutex_);
+    backup_in_progress_.Release_Store(NULL);
+    if (s.ok() && backup_deferred_delete_) {
+      DeleteObsoleteFiles();
+    }
+    backup_deferred_delete_ = false;
+    bg_log_occupied_ = false;
+    bg_log_cv_.Signal();
+    backup_cv_.Signal();
+  }
+  return s;
 }
 
 // Default implementations of convenience methods that subclasses of DB
