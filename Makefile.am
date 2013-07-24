@@ -35,11 +35,19 @@ pkgconfig_DATA = libhyperleveldb.pc
 
 EXTRA_DIST =
 EXTRA_DIST += AUTHORS
+EXTRA_DIST += doc/benchmark.html
+EXTRA_DIST += doc/doc.css
+EXTRA_DIST += doc/impl.html
+EXTRA_DIST += doc/index.html
+EXTRA_DIST += doc/log_format.txt
+EXTRA_DIST += doc/table_format.txt
+EXTRA_DIST += helpers/memenv/memenv.cc
+EXTRA_DIST += helpers/memenv/memenv_test.cc
 EXTRA_DIST += LICENSE
 EXTRA_DIST += NEWS
+EXTRA_DIST += port/README
 EXTRA_DIST += README
 EXTRA_DIST += TODO
-EXTRA_DIST += port/README
 
 nobase_include_HEADERS =
 nobase_include_HEADERS += hyperleveldb/cache.h
