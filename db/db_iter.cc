@@ -129,6 +129,9 @@ inline bool DBIter::ParseKey(ParsedInternalKey* ikey) {
 void DBIter::Next() {
   assert(valid_);
 
+  // Temporarily use saved_key_ as storage for key to skip.
+  std::string* skip = &saved_key_;
+
   if (direction_ == kReverse) {  // Switch directions?
     direction_ = kForward;
     // iter_ is pointing just before the entries for this->key(),
@@ -144,11 +147,13 @@ void DBIter::Next() {
       saved_key_.clear();
       return;
     }
+  } else {
+    // if we did not reverse direction, save the current key as the one which we
+    // must advance past.  If we did reverse direction, it's already been set,
+    // so we don't need to do it.  This conditional solves upstream issue #200.
+    SaveKey(ExtractUserKey(iter_->key()), skip);
   }
 
-  // Temporarily use saved_key_ as storage for key to skip.
-  std::string* skip = &saved_key_;
-  SaveKey(ExtractUserKey(iter_->key()), skip);
   FindNextUserEntry(true, skip);
 }
 
