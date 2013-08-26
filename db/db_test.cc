@@ -614,6 +614,47 @@ TEST(DBTest, GetPicksCorrectFile) {
   } while (ChangeOptions());
 }
 
+#if 0
+TEST(DBTest, GetEncountersEmptyLevel) {
+  do {
+    // Arrange for the following to happen:
+    //   * sstable A in level 0
+    //   * nothing in level 1
+    //   * sstable B in level 2
+    // Then do enough Get() calls to arrange for an automatic compaction
+    // of sstable A.  A bug would cause the compaction to be marked as
+    // occuring at level 1 (instead of the correct level 0).
+
+    // Step 1: First place sstables in levels 0 and 2
+    int compaction_count = 0;
+    while (NumTableFilesAtLevel(0) == 0 ||
+           NumTableFilesAtLevel(2) == 0) {
+      ASSERT_LE(compaction_count, 100) << "could not fill levels 0 and 2";
+      compaction_count++;
+      Put("a", "begin");
+      Put("z", "end");
+      dbfull()->TEST_CompactMemTable();
+    }
+
+    // Step 2: clear level 1 if necessary.
+    dbfull()->TEST_CompactRange(1, NULL, NULL);
+    ASSERT_EQ(NumTableFilesAtLevel(0), 1);
+    ASSERT_EQ(NumTableFilesAtLevel(1), 0);
+    ASSERT_EQ(NumTableFilesAtLevel(2), 1);
+
+    // Step 3: read a bunch of times
+    for (int i = 0; i < 1000; i++) {
+      ASSERT_EQ("NOT_FOUND", Get("missing"));
+    }
+
+    // Step 4: Wait for compaction to finish
+    env_->SleepForMicroseconds(1000000);
+
+    ASSERT_EQ(NumTableFilesAtLevel(0), 0);
+  } while (ChangeOptions());
+}
+#endif
+
 TEST(DBTest, IterEmpty) {
   Iterator* iter = db_->NewIterator(ReadOptions());
 
