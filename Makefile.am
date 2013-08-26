@@ -161,6 +161,7 @@ EXTRA_PROGRAMS += db_bench_sqlite3
 EXTRA_PROGRAMS += db_bench_tree_db
 
 check_PROGRAMS =
+check_PROGRAMS += autocompact_test
 check_PROGRAMS += arena_test
 check_PROGRAMS += bloom_test
 check_PROGRAMS += c_test
@@ -199,6 +200,9 @@ db_bench_tree_db_LDADD = -lkyotocabinet
 
 leveldbutil_SOURCES = db/leveldb_main.cc
 leveldbutil_LDADD = libhyperleveldb.la -lpthread
+
+autocompact_test_SOURCES = db/autocompact_test.cc $(TESTHARNESS)
+autocompact_test_LDADD = libhyperleveldb.la -lpthread
 
 arena_test_SOURCES = util/arena_test.cc $(TESTHARNESS)
 arena_test_LDADD = libhyperleveldb.la -lpthread

@@ -61,13 +61,19 @@ class DBImpl : public DB {
   // file at a level >= 1.
   int64_t TEST_MaxNextLevelOverlappingBytes();
 
+  // Record a sample of bytes read at the specified internal key.
+  // Samples are taken approximately once every config::kReadBytesPeriod
+  // bytes.
+  void RecordReadSample(Slice key);
+
  private:
   friend class DB;
   struct CompactionState;
   struct Writer;
 
   Iterator* NewInternalIterator(const ReadOptions&,
-                                SequenceNumber* latest_snapshot);
+                                SequenceNumber* latest_snapshot,
+                                uint32_t* seed);
 
   Status NewDB();
 
@@ -144,6 +150,7 @@ class DBImpl : public DB {
   std::tr1::shared_ptr<WritableFile> logfile_;
   uint64_t logfile_number_;
   std::tr1::shared_ptr<log::Writer> log_;
+  uint32_t seed_;                // For sampling.
 
   // Synchronize writers
   uint64_t __attribute__ ((aligned (8))) writers_lower_;
