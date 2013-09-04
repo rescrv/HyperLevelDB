@@ -228,7 +228,7 @@ class VersionSet {
   // Pick level for a new compaction.
   // Returns kNumLevels if there is no compaction to be done.
   // Otherwise returns the lowest unlocked level that may compact upwards.
-  int PickCompactionLevel(bool* locked);
+  int PickCompactionLevel(bool* locked, bool seek_driven) const;
 
   // Pick inputs for a new compaction at the specified level.
   // Returns NULL if there is no compaction to be done.
@@ -254,17 +254,8 @@ class VersionSet {
   Iterator* MakeInputIterator(Compaction* c);
 
   // Returns true iff some level needs a compaction.
-  bool NeedsCompaction(bool* levels) const {
-    Version* v = current_;
-    for (int i = 0; i + 1 < config::kNumLevels; ++i) {
-      if (!levels[i] && !levels[i + 1] &&
-          v->compaction_scores_[i] >= 1.0 &&
-          (i + 2 == config::kNumLevels ||
-           v->compaction_scores_[i + 1] < 1.0)) {
-        return true;
-      }
-    }
-    return v->file_to_compact_ != NULL;
+  bool NeedsCompaction(bool* levels, bool seek_driven) const {
+    return PickCompactionLevel(levels, seek_driven) != config::kNumLevels;
   }
 
   // Add all files listed in any live version to *live.

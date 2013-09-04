@@ -1358,7 +1358,7 @@ void VersionSet::GetCompactionBoundaries(Version* v,
   }
 }
 
-int VersionSet::PickCompactionLevel(bool* locked) {
+int VersionSet::PickCompactionLevel(bool* locked, bool seek_driven) const {
   // Find an unlocked level has score >= 1 where level + 1 has score < 1.
   int level = config::kNumLevels;
   for (int i = 0; i + 1 < config::kNumLevels; ++i) {
@@ -1366,12 +1366,14 @@ int VersionSet::PickCompactionLevel(bool* locked) {
       continue;
     }
     if (current_->compaction_scores_[i + 0] >= 1.0 &&
-        current_->compaction_scores_[i + 1] < 1.0) {
+        (i + 2 >= config::kNumLevels ||
+         current_->compaction_scores_[i + 1] < 1.0)) {
       level = i;
       break;
     }
   }
-  if (level == config::kNumLevels &&
+  if (seek_driven &&
+      level == config::kNumLevels &&
       current_->file_to_compact_ != NULL &&
       !locked[current_->file_to_compact_level_ + 0] &&
       !locked[current_->file_to_compact_level_ + 1]) {

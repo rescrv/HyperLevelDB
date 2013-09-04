@@ -35,6 +35,8 @@
 
 namespace leveldb {
 
+const int kStraightReads = 50;
+
 const int kNumNonTableCacheFiles = 10;
 
 struct DBImpl::CompactionState {
@@ -131,6 +133,7 @@ DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
       bg_log_cv_(&mutex_),
       bg_log_occupied_(false),
       manual_compaction_(NULL),
+      straight_reads_(0),
       backup_cv_(&mutex_),
       backup_in_progress_(),
       backup_deferred_delete_(),
@@ -666,7 +669,7 @@ void DBImpl::CompactLevelThread() {
   while (!shutting_down_.Acquire_Load()) {
     while (!shutting_down_.Acquire_Load() &&
            manual_compaction_ == NULL &&
-           !versions_->NeedsCompaction(levels_locked_)) {
+           !versions_->NeedsCompaction(levels_locked_, straight_reads_ > kStraightReads)) {
       bg_compaction_cv_.Wait();
     }
     if (shutting_down_.Acquire_Load()) {
@@ -724,7 +727,7 @@ Status DBImpl::BackgroundCompaction() {
         (m->end ? m->end->DebugString().c_str() : "(end)"),
         (m->done ? "(end)" : manual_end.DebugString().c_str()));
   } else {
-    int level = versions_->PickCompactionLevel(levels_locked_);
+    int level = versions_->PickCompactionLevel(levels_locked_, straight_reads_ > kStraightReads);
     if (level != config::kNumLevels) {
       c = versions_->PickCompaction(versions_->current(), level);
     }
@@ -1194,6 +1197,7 @@ Iterator* DBImpl::NewInternalIterator(const ReadOptions& options,
                                       uint32_t* seed) {
   IterState* cleanup = new IterState;
   mutex_.Lock();
+  ++straight_reads_;
   *latest_snapshot = versions_->LastSequence();
 
   // Collect together all needed child iterators
@@ -1272,6 +1276,7 @@ Status DBImpl::Get(const ReadOptions& options,
   if (have_stat_update && current->UpdateStats(stats)) {
     bg_compaction_cv_.Signal();
   }
+  ++straight_reads_;
   mem->Unref();
   if (imm != NULL) imm->Unref();
   current->Unref();
@@ -1292,6 +1297,7 @@ Iterator* DBImpl::NewIterator(const ReadOptions& options) {
 
 void DBImpl::RecordReadSample(Slice key) {
   MutexLock l(&mutex_);
+  ++straight_reads_;
   if (versions_->current()->RecordReadSample(key)) {
     bg_compaction_cv_.Signal();
   }
@@ -1375,6 +1381,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
 Status DBImpl::SequenceWriteBegin(Writer* w, WriteBatch* updates) {
   Status s;
   MutexLock l(&mutex_);
+  straight_reads_ = 0;
   bool force = updates == NULL;
   bool allow_delay = !force;
   w->old_log.reset();

@@ -188,6 +188,9 @@ class DBImpl : public DB {
   };
   ManualCompaction* manual_compaction_;
 
+  // how many reads have we done in a row, uninterrupted by writes
+  uint64_t straight_reads_;
+
   VersionSet* versions_;
 
   // Information for ongoing backup processes
