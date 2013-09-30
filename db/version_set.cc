@@ -176,30 +176,41 @@ bool SomeFileOverlapsRange(
 // is the largest key that occurs in the file, and value() is an
 // 16-byte value containing the file number and file size, both
 // encoded using EncodeFixed64.
+//
+// If num != 0, then do not call SeekToLast, Prev
 class Version::LevelFileNumIterator : public Iterator {
  public:
   LevelFileNumIterator(const InternalKeyComparator& icmp,
-                       const std::vector<FileMetaData*>* flist)
+                       const std::vector<FileMetaData*>* flist,
+                       uint64_t num)
       : icmp_(icmp),
         flist_(flist),
-        index_(flist->size()) {        // Marks as invalid
+        index_(flist->size()), // Marks as invalid
+        number_(num) {
   }
   virtual bool Valid() const {
     return index_ < flist_->size();
   }
   virtual void Seek(const Slice& target) {
     index_ = FindFile(icmp_, *flist_, target);
+    Bump();
   }
-  virtual void SeekToFirst() { index_ = 0; }
+  virtual void SeekToFirst() {
+    index_ = 0;
+    Bump();
+  }
   virtual void SeekToLast() {
+    assert(number_ == 0);
     index_ = flist_->empty() ? 0 : flist_->size() - 1;
   }
   virtual void Next() {
     assert(Valid());
     index_++;
+    Bump();
   }
   virtual void Prev() {
     assert(Valid());
+    assert(number_ == 0);
     if (index_ == 0) {
       index_ = flist_->size();  // Marks as invalid
     } else {
@@ -218,9 +229,16 @@ class Version::LevelFileNumIterator : public Iterator {
   }
   virtual Status status() const { return Status::OK(); }
  private:
+  void Bump() {
+    while (index_ < flist_->size() &&
+           (*flist_)[index_]->number < number_) {
+      ++index_;
+    }
+  }
   const InternalKeyComparator icmp_;
   const std::vector<FileMetaData*>* const flist_;
   uint32_t index_;
+  uint64_t number_;
 
   // Backing store for value().  Holds the file number and size.
   mutable char value_buf_[16];
@@ -241,14 +259,19 @@ static Iterator* GetFileIterator(void* arg,
 }
 
 Iterator* Version::NewConcatenatingIterator(const ReadOptions& options,
-                                            int level) const {
+                                            int level, uint64_t num) const {
   return NewTwoLevelIterator(
-      new LevelFileNumIterator(vset_->icmp_, &files_[level]),
+      new LevelFileNumIterator(vset_->icmp_, &files_[level], num),
       &GetFileIterator, vset_->table_cache_, options);
 }
 
 void Version::AddIterators(const ReadOptions& options,
                            std::vector<Iterator*>* iters) {
+  return AddSomeIterators(options, 0, iters);
+}
+
+void Version::AddSomeIterators(const ReadOptions& options, uint64_t num,
+                               std::vector<Iterator*>* iters) {
   // Merge all level zero files together since they may overlap
   for (size_t i = 0; i < files_[0].size(); i++) {
     iters->push_back(
@@ -261,7 +284,7 @@ void Version::AddIterators(const ReadOptions& options,
   // lazily.
   for (int level = 1; level < config::kNumLevels; level++) {
     if (!files_[level].empty()) {
-      iters->push_back(NewConcatenatingIterator(options, level));
+      iters->push_back(NewConcatenatingIterator(options, level, num));
     }
   }
 }
@@ -1278,7 +1301,7 @@ Iterator* VersionSet::MakeInputIterator(Compaction* c) {
       } else {
         // Create concatenating iterator for the files from this level
         list[num++] = NewTwoLevelIterator(
-            new Version::LevelFileNumIterator(icmp_, &c->inputs_[which]),
+            new Version::LevelFileNumIterator(icmp_, &c->inputs_[which], 0),
             &GetFileIterator, table_cache_, options);
       }
     }

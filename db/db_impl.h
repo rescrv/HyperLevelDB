@@ -6,10 +6,12 @@
 #define STORAGE_LEVELDB_DB_DB_IMPL_H_
 
 #include <deque>
+#include <list>
 #include <set>
 #include <tr1/memory>
 #include "db/dbformat.h"
 #include "db/log_writer.h"
+#include "db/replay_iterator.h"
 #include "db/snapshot.h"
 #include "hyperleveldb/db.h"
 #include "hyperleveldb/env.h"
@@ -37,6 +39,11 @@ class DBImpl : public DB {
                      const Slice& key,
                      std::string* value);
   virtual Iterator* NewIterator(const ReadOptions&);
+  virtual void GetReplayTimestamp(std::string* timestamp);
+  virtual void AllowGarbageCollectBeforeTimestamp(const std::string& timestamp);
+  virtual Status GetReplayIterator(const std::string& timestamp,
+                                   ReplayIterator** iter);
+  virtual void ReleaseReplayIterator(ReplayIterator* iter);
   virtual const Snapshot* GetSnapshot();
   virtual void ReleaseSnapshot(const Snapshot* snapshot);
   virtual bool GetProperty(const Slice& property, std::string* value);
@@ -66,12 +73,16 @@ class DBImpl : public DB {
   // bytes.
   void RecordReadSample(Slice key);
 
+  // Peek at the last sequence;
+  // REQURES: mutex_ not held
+  SequenceNumber LastSequence();
+
  private:
   friend class DB;
   struct CompactionState;
   struct Writer;
 
-  Iterator* NewInternalIterator(const ReadOptions&,
+  Iterator* NewInternalIterator(const ReadOptions&, uint64_t number,
                                 SequenceNumber* latest_snapshot,
                                 uint32_t* seed);
 
@@ -187,6 +198,12 @@ class DBImpl : public DB {
     InternalKey tmp_storage;    // Used to keep track of compaction progress
   };
   ManualCompaction* manual_compaction_;
+
+  // Where have we pinned tombstones?
+  SequenceNumber manual_garbage_cutoff_;
+
+  // replay iterators
+  std::list<ReplayIteratorImpl*> replay_iters_;
 
   // how many reads have we done in a row, uninterrupted by writes
   uint64_t straight_reads_;

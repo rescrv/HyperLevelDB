@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include "hyperleveldb/iterator.h"
 #include "hyperleveldb/options.h"
+#include "hyperleveldb/replay_iterator.h"
 
 namespace leveldb {
 
@@ -146,6 +147,23 @@ class DB {
   // even encouraged, to improve the performance of this call through
   // hard-links.
   virtual Status LiveBackup(const Slice& name) = 0;
+
+  // Return an opaque timestamp that identifies the current point in time of the
+  // database.  This timestamp may be subsequently presented to the
+  // NewReplayIterator method to create a ReplayIterator.
+  virtual void GetReplayTimestamp(std::string* timestamp) = 0;
+
+  // Set the lower bound for manual garbage collection.  This method only takes
+  // effect when Options.manual_garbage_collection is true.
+  virtual void AllowGarbageCollectBeforeTimestamp(const std::string& timestamp) = 0;
+
+  // Return a ReplayIterator that returns every write operation performed after
+  // the timestamp.
+  virtual Status GetReplayIterator(const std::string& timestamp,
+                                   ReplayIterator** iter) = 0;
+
+  // Release a previously allocated replay iterator.
+  virtual void ReleaseReplayIterator(ReplayIterator* iter) = 0;
 
  private:
   // No copying allowed

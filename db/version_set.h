@@ -64,6 +64,12 @@ class Version {
   // REQUIRES: This version has been saved (see VersionSet::SaveTo)
   void AddIterators(const ReadOptions&, std::vector<Iterator*>* iters);
 
+  // Append to *iters a sequence of iterators that will
+  // yield a subset of the contents of this Version when merged together.
+  // Yields only files with number greater or equal to num
+  // REQUIRES: This version has been saved (see VersionSet::SaveTo)
+  void AddSomeIterators(const ReadOptions&, uint64_t num, std::vector<Iterator*>* iters);
+
   // Lookup the value for key.  If found, store it in *val and
   // return OK.  Else return a non-OK status.  Fills *stats.
   // REQUIRES: lock is not held
@@ -119,7 +125,7 @@ class Version {
   friend class VersionSet;
 
   class LevelFileNumIterator;
-  Iterator* NewConcatenatingIterator(const ReadOptions&, int level) const;
+  Iterator* NewConcatenatingIterator(const ReadOptions&, int level, uint64_t num) const;
 
   // Call func(arg, level, f) for every file that overlaps user_key in
   // order from newest to oldest.  If an invocation of func returns

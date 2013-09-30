@@ -1834,6 +1834,17 @@ class ModelDB: public DB {
       return new ModelIter(snapshot_state, false);
     }
   }
+  virtual void GetReplayTimestamp(std::string* timestamp) {
+  }
+  virtual void AllowGarbageCollectBeforeTimestamp(const std::string& timestamp) {
+  }
+  virtual Status GetReplayIterator(const std::string& timestamp,
+                                   ReplayIterator** iter) {
+    *iter = NULL;
+    return Status::OK();
+  }
+  virtual void ReleaseReplayIterator(ReplayIterator* iter) {
+  }
   virtual const Snapshot* GetSnapshot() {
     ModelSnapshot* snapshot = new ModelSnapshot;
     snapshot->map_ = map_;
@@ -2031,6 +2042,61 @@ TEST(DBTest, Randomized) {
     if (model_snap != NULL) model.ReleaseSnapshot(model_snap);
     if (db_snap != NULL) db_->ReleaseSnapshot(db_snap);
   } while (ChangeOptions());
+}
+
+TEST(DBTest, Replay) {
+  std::string ts;
+  db_->GetReplayTimestamp(&ts);
+  ASSERT_OK(Put("key", "v0"));
+  ASSERT_OK(Put("key", "v1"));
+  ASSERT_OK(Put("key", "v2"));
+  ASSERT_OK(Put("key", "v3"));
+  ASSERT_OK(Put("key", "v4"));
+  ASSERT_OK(Put("key", "v5"));
+  ASSERT_OK(Put("key", "v6"));
+  ASSERT_OK(Put("key", "v7"));
+  ASSERT_OK(Put("key", "v8"));
+  ASSERT_OK(Put("key", "v9"));
+
+  // iterate
+  ReplayIterator* iter = NULL;
+  ASSERT_OK(db_->GetReplayIterator(ts, &iter));
+  ASSERT_TRUE(iter->Valid());
+  ASSERT_TRUE(iter->HasValue());
+  ASSERT_EQ("key", iter->key().ToString());
+  ASSERT_EQ("v9", iter->value().ToString());
+  iter->Next();
+  ASSERT_TRUE(!iter->Valid());
+  ASSERT_TRUE(!iter->Valid());
+
+  // Add another and iterate some more
+  ASSERT_OK(Put("key", "v10"));
+  ASSERT_TRUE(iter->Valid());
+  ASSERT_TRUE(iter->HasValue());
+  ASSERT_EQ("key", iter->key().ToString());
+  ASSERT_EQ("v10", iter->value().ToString());
+  iter->Next();
+  ASSERT_TRUE(!iter->Valid());
+
+  // Dump the memtable
+  dbfull()->TEST_CompactMemTable();
+
+  // Write into the new MemTable and iterate some more
+  ASSERT_OK(Put("key", "v11"));
+  ASSERT_TRUE(iter->Valid());
+  ASSERT_TRUE(iter->HasValue());
+  ASSERT_EQ("key", iter->key().ToString());
+  ASSERT_EQ("v11", iter->value().ToString());
+  iter->Next();
+  ASSERT_TRUE(!iter->Valid());
+
+  // What does it do on delete?
+  ASSERT_OK(Delete("key"));
+  ASSERT_TRUE(iter->Valid());
+  ASSERT_TRUE(!iter->HasValue());
+  ASSERT_EQ("key", iter->key().ToString());
+  iter->Next();
+  ASSERT_TRUE(!iter->Valid());
 }
 
 std::string MakeKey(unsigned int num) {

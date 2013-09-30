@@ -17,11 +17,13 @@
 #include "db/log_reader.h"
 #include "db/log_writer.h"
 #include "db/memtable.h"
+#include "db/replay_iterator.h"
 #include "db/table_cache.h"
 #include "db/version_set.h"
 #include "db/write_batch_internal.h"
 #include "hyperleveldb/db.h"
 #include "hyperleveldb/env.h"
+#include "hyperleveldb/replay_iterator.h"
 #include "hyperleveldb/status.h"
 #include "hyperleveldb/table.h"
 #include "hyperleveldb/table_builder.h"
@@ -33,6 +35,7 @@
 #include "util/logging.h"
 #include "util/mutexlock.h"
 
+#include <iostream>
 namespace leveldb {
 
 const int kStraightReads = 50;
@@ -133,6 +136,8 @@ DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
       bg_log_cv_(&mutex_),
       bg_log_occupied_(false),
       manual_compaction_(NULL),
+      manual_garbage_cutoff_(raw_options.manual_garbage_collection ?
+                             SequenceNumber(0) : kMaxSequenceNumber),
       straight_reads_(0),
       backup_cv_(&mutex_),
       backup_in_progress_(),
@@ -1062,6 +1067,9 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   } else {
     compact->smallest_snapshot = snapshots_.oldest()->number_;
   }
+  if (compact->smallest_snapshot > manual_garbage_cutoff_) {
+    compact->smallest_snapshot = manual_garbage_cutoff_;
+  }
 
   // Release mutex while we're actually doing the compaction work
   mutex_.Unlock();
@@ -1073,6 +1081,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   std::string current_user_key;
   bool has_current_user_key = false;
   SequenceNumber last_sequence_for_key = kMaxSequenceNumber;
+  uint64_t i = 0;
   for (; input->Valid() && !shutting_down_.Acquire_Load(); ) {
     Slice key = input->key();
     // Handle key/value, add to state, etc.
@@ -1091,6 +1100,9 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
         has_current_user_key = true;
         last_sequence_for_key = kMaxSequenceNumber;
       }
+
+      // Just remember that last_sequence_for_key is decreasing over time, and
+      // all of this makes sense.
 
       if (last_sequence_for_key <= compact->smallest_snapshot) {
         // Hidden by an newer entry for same user key
@@ -1192,7 +1204,7 @@ static void CleanupIteratorState(void* arg1, void* arg2) {
 }
 }  // namespace
 
-Iterator* DBImpl::NewInternalIterator(const ReadOptions& options,
+Iterator* DBImpl::NewInternalIterator(const ReadOptions& options, uint64_t number,
                                       SequenceNumber* latest_snapshot,
                                       uint32_t* seed) {
   IterState* cleanup = new IterState;
@@ -1208,7 +1220,7 @@ Iterator* DBImpl::NewInternalIterator(const ReadOptions& options,
     list.push_back(imm_->NewIterator());
     imm_->Ref();
   }
-  versions_->current()->AddIterators(options, &list);
+  versions_->current()->AddSomeIterators(options, number, &list);
   Iterator* internal_iter =
       NewMergingIterator(&internal_comparator_, &list[0], list.size());
   versions_->current()->Ref();
@@ -1227,7 +1239,7 @@ Iterator* DBImpl::NewInternalIterator(const ReadOptions& options,
 Iterator* DBImpl::TEST_NewInternalIterator() {
   SequenceNumber ignored;
   uint32_t ignored_seed;
-  return NewInternalIterator(ReadOptions(), &ignored, &ignored_seed);
+  return NewInternalIterator(ReadOptions(), 0, &ignored, &ignored_seed);
 }
 
 int64_t DBImpl::TEST_MaxNextLevelOverlappingBytes() {
@@ -1286,7 +1298,7 @@ Status DBImpl::Get(const ReadOptions& options,
 Iterator* DBImpl::NewIterator(const ReadOptions& options) {
   SequenceNumber latest_snapshot;
   uint32_t seed;
-  Iterator* iter = NewInternalIterator(options, &latest_snapshot, &seed);
+  Iterator* iter = NewInternalIterator(options, 0, &latest_snapshot, &seed);
   return NewDBIterator(
       this, user_comparator(), iter,
       (options.snapshot != NULL
@@ -1295,12 +1307,97 @@ Iterator* DBImpl::NewIterator(const ReadOptions& options) {
       seed);
 }
 
+void DBImpl::GetReplayTimestamp(std::string* timestamp) {
+  uint64_t file = 0;
+  uint64_t seqno = 0;
+
+  {
+    MutexLock l(&mutex_);
+    file = versions_->NewFileNumber();
+    versions_->ReuseFileNumber(file);
+    seqno = versions_->LastSequence();
+  }
+
+  timestamp->clear();
+  PutVarint64(timestamp, file);
+  PutVarint64(timestamp, seqno);
+}
+
+void DBImpl::AllowGarbageCollectBeforeTimestamp(const std::string& timestamp) {
+  Slice ts_slice(timestamp);
+  uint64_t file = 0;
+  uint64_t seqno = 0;
+
+  if (timestamp == "now") {
+    MutexLock l(&mutex_);
+    seqno = versions_->LastSequence();
+    if (manual_garbage_cutoff_ < seqno) {
+      manual_garbage_cutoff_ = seqno;
+    }
+  } else if (GetVarint64(&ts_slice, &file) &&
+             GetVarint64(&ts_slice, &seqno)) {
+    MutexLock l(&mutex_);
+    if (manual_garbage_cutoff_ < seqno) {
+      manual_garbage_cutoff_ = seqno;
+    }
+  }
+}
+
+Status DBImpl::GetReplayIterator(const std::string& timestamp,
+                                 ReplayIterator** iter) {
+  *iter = NULL;
+  Slice ts_slice(timestamp);
+  uint64_t file = 0;
+  uint64_t seqno = 0;
+
+  if (timestamp == "now") {
+    MutexLock l(&mutex_);
+    file = versions_->NewFileNumber();
+    versions_->ReuseFileNumber(file);
+    seqno = versions_->LastSequence();
+  } else if (!GetVarint64(&ts_slice, &file) ||
+             !GetVarint64(&ts_slice, &seqno)) {
+    return Status::InvalidArgument("Timestamp is not valid");
+  }
+
+  ReadOptions options;
+  SequenceNumber latest_snapshot;
+  uint32_t seed;
+  Iterator* internal_iter = NewInternalIterator(options, file, &latest_snapshot, &seed);
+  internal_iter->SeekToFirst();
+  ReplayIteratorImpl* iterimpl;
+  iterimpl = new ReplayIteratorImpl(
+      this, &mutex_, user_comparator(), internal_iter, mem_, SequenceNumber(seqno));
+  *iter = iterimpl;
+  replay_iters_.push_back(iterimpl);
+  return Status::OK();
+}
+
+void DBImpl::ReleaseReplayIterator(ReplayIterator* _iter) {
+  MutexLock l(&mutex_);
+  ReplayIteratorImpl* iter = dynamic_cast<ReplayIteratorImpl*>(_iter);
+  for (std::list<ReplayIteratorImpl*>::iterator it = replay_iters_.begin();
+      it != replay_iters_.end(); ++it) {
+    if (*it == iter) {
+      replay_iters_.erase(it);
+      iter->cleanup();
+      delete iter;
+      return;
+    }
+  }
+}
+
 void DBImpl::RecordReadSample(Slice key) {
   MutexLock l(&mutex_);
   ++straight_reads_;
   if (versions_->current()->RecordReadSample(key)) {
     bg_compaction_cv_.Signal();
   }
+}
+
+SequenceNumber DBImpl::LastSequence() {
+  MutexLock l(&mutex_);
+  return versions_->LastSequence();
 }
 
 const Snapshot* DBImpl::GetSnapshot() {
@@ -1425,6 +1522,10 @@ Status DBImpl::SequenceWriteBegin(Writer* w, WriteBatch* updates) {
       mem_ = new MemTable(internal_comparator_);
       mem_->Ref();
       force = false;   // Do not force another compaction if have room
+      for (std::list<ReplayIteratorImpl*>::iterator it = replay_iters_.begin();
+          it != replay_iters_.end(); ++it) {
+        (*it)->enqueue(mem_, versions_->LastSequence());
+      }
       break;
     }
   }

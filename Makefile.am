@@ -118,6 +118,7 @@ libhyperleveldb_la_SOURCES += db/log_reader.cc
 libhyperleveldb_la_SOURCES += db/log_writer.cc
 libhyperleveldb_la_SOURCES += db/memtable.cc
 libhyperleveldb_la_SOURCES += db/repair.cc
+libhyperleveldb_la_SOURCES += db/replay_iterator.cc
 libhyperleveldb_la_SOURCES += db/table_cache.cc
 libhyperleveldb_la_SOURCES += db/version_edit.cc
 libhyperleveldb_la_SOURCES += db/version_set.cc
