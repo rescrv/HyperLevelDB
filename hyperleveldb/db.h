@@ -157,6 +157,12 @@ class DB {
   // effect when Options.manual_garbage_collection is true.
   virtual void AllowGarbageCollectBeforeTimestamp(const std::string& timestamp) = 0;
 
+  // Validate the timestamp
+  virtual bool ValidateTimestamp(const std::string& timestamp) = 0;
+
+  // Compare two timestamps and return -1, 0, 1 for lt, eq, gt
+  virtual int CompareTimestamps(const std::string& lhs, const std::string& rhs) = 0;
+
   // Return a ReplayIterator that returns every write operation performed after
   // the timestamp.
   virtual Status GetReplayIterator(const std::string& timestamp,

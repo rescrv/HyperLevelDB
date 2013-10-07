@@ -41,6 +41,8 @@ class DBImpl : public DB {
   virtual Iterator* NewIterator(const ReadOptions&);
   virtual void GetReplayTimestamp(std::string* timestamp);
   virtual void AllowGarbageCollectBeforeTimestamp(const std::string& timestamp);
+  virtual bool ValidateTimestamp(const std::string& timestamp);
+  virtual int CompareTimestamps(const std::string& lhs, const std::string& rhs);
   virtual Status GetReplayIterator(const std::string& timestamp,
                                    ReplayIterator** iter);
   virtual void ReleaseReplayIterator(ReplayIterator* iter);
