@@ -1429,9 +1429,8 @@ void DBImpl::ReleaseReplayIterator(ReplayIterator* _iter) {
   for (std::list<ReplayIteratorImpl*>::iterator it = replay_iters_.begin();
       it != replay_iters_.end(); ++it) {
     if (*it == iter) {
+      iter->cleanup(); // calls delete
       replay_iters_.erase(it);
-      iter->cleanup();
-      delete iter;
       return;
     }
   }

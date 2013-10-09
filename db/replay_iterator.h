@@ -29,7 +29,6 @@ class ReplayIteratorImpl : public ReplayIterator {
   // Refs the memtable on its own; caller must hold mutex while creating this
   ReplayIteratorImpl(DBImpl* db, port::Mutex* mutex, const Comparator* cmp,
       Iterator* iter, MemTable* m, SequenceNumber s);
-  virtual ~ReplayIteratorImpl();
   virtual bool Valid();
   virtual void Next();
   virtual bool HasValue();
@@ -40,12 +39,14 @@ class ReplayIteratorImpl : public ReplayIterator {
   // extra interface
 
   // we ref the memtable; caller holds mutex passed into ctor
+  // REQUIRES: caller must hold mutex passed into ctor
   void enqueue(MemTable* m, SequenceNumber s);
 
   // REQUIRES: caller must hold mutex passed into ctor
   void cleanup(); // calls delete this;
 
  private:
+  virtual ~ReplayIteratorImpl();
   bool ParseKey(ParsedInternalKey* ikey);
   bool ParseKey(const Slice& k, ParsedInternalKey* ikey);
   void Prime();
