@@ -1328,7 +1328,9 @@ void DBImpl::AllowGarbageCollectBeforeTimestamp(const std::string& timestamp) {
   uint64_t file = 0;
   uint64_t seqno = 0;
 
-  if (timestamp == "now") {
+  if (timestamp == "all") {
+    // keep zeroes
+  } else if (timestamp == "now") {
     MutexLock l(&mutex_);
     seqno = versions_->LastSequence();
     if (manual_garbage_cutoff_ < seqno) {
@@ -1347,8 +1349,9 @@ bool DBImpl::ValidateTimestamp(const std::string& ts) {
   uint64_t file = 0;
   uint64_t seqno = 0;
   Slice ts_slice(ts);
-  return ts == "now" || (GetVarint64(&ts_slice, &file) &&
-                         GetVarint64(&ts_slice, &seqno));
+  return ts == "all" || ts == "now" ||
+         (GetVarint64(&ts_slice, &file) &&
+          GetVarint64(&ts_slice, &seqno));
 }
 
 int DBImpl::CompareTimestamps(const std::string& lhs, const std::string& rhs) {
@@ -1360,14 +1363,18 @@ int DBImpl::CompareTimestamps(const std::string& lhs, const std::string& rhs) {
     MutexLock l(&mutex_);
     now = versions_->LastSequence();
   }
-  if (lhs == "now") {
+  if (lhs == "all") {
+    lhs_seqno = 0;
+  } else if (lhs == "now") {
     lhs_seqno = now;
   } else {
     Slice lhs_slice(lhs);
     GetVarint64(&lhs_slice, &tmp);
     GetVarint64(&lhs_slice, &lhs_seqno);
   }
-  if (rhs == "now") {
+  if (rhs == "all") {
+    rhs_seqno = 0;
+  } else if (rhs == "now") {
     rhs_seqno = now;
   } else {
     Slice rhs_slice(rhs);
@@ -1391,7 +1398,9 @@ Status DBImpl::GetReplayIterator(const std::string& timestamp,
   uint64_t file = 0;
   uint64_t seqno = 0;
 
-  if (timestamp == "now") {
+  if (timestamp == "all") {
+    seqno = 0;
+  } else if (timestamp == "now") {
     MutexLock l(&mutex_);
     file = versions_->NewFileNumber();
     versions_->ReuseFileNumber(file);
