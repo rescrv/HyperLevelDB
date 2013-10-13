@@ -95,22 +95,28 @@ void ReplayIteratorImpl::enqueue(MemTable* m, SequenceNumber s) {
 }
 
 void ReplayIteratorImpl::cleanup() {
-  if (rs_.mem_) {
-    rs_.mem_->Unref();
-    rs_.mem_ = NULL;
-  }
+  mutex_->Unlock();
   if (rs_.iter_) {
     delete rs_.iter_;
-    rs_.iter_ = NULL;
   }
+  if (rs_.mem_) {
+    rs_.mem_->Unref();
+  }
+  mutex_->Lock();
+  rs_.iter_ = NULL;
+  rs_.mem_ = NULL;
 
   while (!mems_.empty()) {
-    if (mems_.front().mem_) {
-      mems_.front().mem_->Unref();
+    MemTable* mem = mems_.front().mem_;
+    Iterator* iter = mems_.front().iter_;
+    mutex_->Unlock();
+    if (iter) {
+      delete iter;
     }
-    if (mems_.front().iter_) {
-      delete mems_.front().iter_;
+    if (mem) {
+      mem->Unref();
     }
+    mutex_->Lock();
     mems_.pop_front();
   }
 
