@@ -1838,6 +1838,12 @@ class ModelDB: public DB {
   }
   virtual void AllowGarbageCollectBeforeTimestamp(const std::string& timestamp) {
   }
+  virtual bool ValidateTimestamp(const std::string&) {
+    return false;
+  }
+  virtual int CompareTimestamps(const std::string&, const std::string&) {
+    return 0;
+  }
   virtual Status GetReplayIterator(const std::string& timestamp,
                                    ReplayIterator** iter) {
     *iter = NULL;
