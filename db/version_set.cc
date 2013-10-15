@@ -1320,16 +1320,16 @@ struct CompactionBoundary {
 };
 
 struct CmpByRange {
-  CmpByRange(const Comparator* cmp) : cmp_(cmp) {}
+  CmpByRange(const InternalKeyComparator* cmp) : cmp_(cmp) {}
   bool operator () (const FileMetaData* lhs, const FileMetaData* rhs) {
-    int smallest = cmp_->Compare(lhs->smallest.user_key(), rhs->smallest.user_key());
+    int smallest = cmp_->Compare(lhs->smallest, rhs->smallest);
     if (smallest == 0) {
-      return cmp_->Compare(lhs->largest.user_key(), rhs->largest.user_key()) < 0;
+      return cmp_->Compare(lhs->largest, rhs->largest) < 0;
     }
     return smallest < 0;
   }
   private:
-    const Comparator* cmp_;
+    const InternalKeyComparator* cmp_;
 };
 
 // Stores the compaction boundaries between level and level + 1
@@ -1346,8 +1346,8 @@ void VersionSet::GetCompactionBoundaries(Version* v,
   *LB = v->files_[level + 1];
   *LA_sizes = std::vector<uint64_t>(LA->size() + 1, 0);
   *LB_sizes = std::vector<uint64_t>(LB->size() + 1, 0);
-  std::sort(LA->begin(), LA->end(), CmpByRange(user_cmp));
-  std::sort(LB->begin(), LB->end(), CmpByRange(user_cmp));
+  std::sort(LA->begin(), LA->end(), CmpByRange(&icmp_));
+  std::sort(LB->begin(), LB->end(), CmpByRange(&icmp_));
   boundaries->resize(LA->size());
 
   // compute sizes
