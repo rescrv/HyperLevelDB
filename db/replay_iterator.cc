@@ -155,7 +155,6 @@ void ReplayIteratorImpl::Prime() {
         current_user_key_.assign(ikey.user_key.data(), ikey.user_key.size());
         has_current_user_key_ = true;
         if (ikey.sequence >= rs_.seq_start_ &&
-            ikey.sequence < rs_.seq_limit_ &&
             (ikey.type == kTypeDeletion || ikey.type == kTypeValue)) {
           valid_ = true;
           return;
