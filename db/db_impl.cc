@@ -1206,9 +1206,11 @@ static void CleanupIteratorState(void* arg1, void* arg2) {
 
 Iterator* DBImpl::NewInternalIterator(const ReadOptions& options, uint64_t number,
                                       SequenceNumber* latest_snapshot,
-                                      uint32_t* seed) {
+                                      uint32_t* seed, bool external_sync) {
   IterState* cleanup = new IterState;
-  mutex_.Lock();
+  if (!external_sync) {
+    mutex_.Lock();
+  }
   ++straight_reads_;
   *latest_snapshot = versions_->LastSequence();
 
@@ -1232,14 +1234,16 @@ Iterator* DBImpl::NewInternalIterator(const ReadOptions& options, uint64_t numbe
   internal_iter->RegisterCleanup(CleanupIteratorState, cleanup, NULL);
 
   *seed = ++seed_;
-  mutex_.Unlock();
+  if (!external_sync) {
+    mutex_.Unlock();
+  }
   return internal_iter;
 }
 
 Iterator* DBImpl::TEST_NewInternalIterator() {
   SequenceNumber ignored;
   uint32_t ignored_seed;
-  return NewInternalIterator(ReadOptions(), 0, &ignored, &ignored_seed);
+  return NewInternalIterator(ReadOptions(), 0, &ignored, &ignored_seed, false);
 }
 
 int64_t DBImpl::TEST_MaxNextLevelOverlappingBytes() {
@@ -1298,7 +1302,7 @@ Status DBImpl::Get(const ReadOptions& options,
 Iterator* DBImpl::NewIterator(const ReadOptions& options) {
   SequenceNumber latest_snapshot;
   uint32_t seed;
-  Iterator* iter = NewInternalIterator(options, 0, &latest_snapshot, &seed);
+  Iterator* iter = NewInternalIterator(options, 0, &latest_snapshot, &seed, false);
   return NewDBIterator(
       this, user_comparator(), iter,
       (options.snapshot != NULL
@@ -1413,7 +1417,8 @@ Status DBImpl::GetReplayIterator(const std::string& timestamp,
   ReadOptions options;
   SequenceNumber latest_snapshot;
   uint32_t seed;
-  Iterator* internal_iter = NewInternalIterator(options, file, &latest_snapshot, &seed);
+  MutexLock l(&mutex_);
+  Iterator* internal_iter = NewInternalIterator(options, file, &latest_snapshot, &seed, true);
   internal_iter->SeekToFirst();
   ReplayIteratorImpl* iterimpl;
   iterimpl = new ReplayIteratorImpl(

@@ -86,7 +86,7 @@ class DBImpl : public DB {
 
   Iterator* NewInternalIterator(const ReadOptions&, uint64_t number,
                                 SequenceNumber* latest_snapshot,
-                                uint32_t* seed);
+                                uint32_t* seed, bool external_sync);
 
   Status NewDB();
 
