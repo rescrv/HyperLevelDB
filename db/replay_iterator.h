@@ -60,6 +60,7 @@ class ReplayIteratorImpl : public ReplayIterator {
 
   bool has_current_user_key_;
   std::string current_user_key_;
+  SequenceNumber current_user_sequence_;
 
   ReplayState rs_;
   std::list<ReplayState> mems_;

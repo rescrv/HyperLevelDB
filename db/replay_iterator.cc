@@ -47,6 +47,7 @@ ReplayIteratorImpl::ReplayIteratorImpl(DBImpl* db, port::Mutex* mutex, const Com
     status_(),
     has_current_user_key_(false),
     current_user_key_(),
+    current_user_sequence_(),
     rs_(iter, s, kMaxSequenceNumber),
     mems_() {
   m->Ref();
@@ -63,7 +64,6 @@ bool ReplayIteratorImpl::Valid() {
 
 void ReplayIteratorImpl::Next() {
   rs_.iter_->Next();
-  Prime();
 }
 
 bool ReplayIteratorImpl::HasValue() {
@@ -143,40 +143,42 @@ void ReplayIteratorImpl::Prime() {
   }
   while (true) {
     assert(rs_.iter_);
-
     while (rs_.iter_->Valid()) {
       ParsedInternalKey ikey;
       if (!ParseKey(rs_.iter_->key(), &ikey)) {
         return;
       }
-      if (!has_current_user_key_ ||
-          user_comparator_->Compare(ikey.user_key,
-                                    Slice(current_user_key_)) != 0) {
-        current_user_key_.assign(ikey.user_key.data(), ikey.user_key.size());
+      // if we can consider this key, and it's recent enough and of the right
+      // type
+      if ((!has_current_user_key_ ||
+           user_comparator_->Compare(ikey.user_key,
+                                     Slice(current_user_key_)) != 0 ||
+           ikey.sequence >= current_user_sequence_) &&
+          (ikey.sequence >= rs_.seq_start_ &&
+            (ikey.type == kTypeDeletion || ikey.type == kTypeValue))) {
         has_current_user_key_ = true;
-        if (ikey.sequence >= rs_.seq_start_ &&
-            (ikey.type == kTypeDeletion || ikey.type == kTypeValue)) {
-          valid_ = true;
-          return;
-        }
+        current_user_key_.assign(ikey.user_key.data(), ikey.user_key.size());
+        current_user_sequence_ = ikey.sequence;
+        valid_ = true;
+        return;
       }
       rs_.iter_->Next();
     }
-
     if (!rs_.iter_->status().ok()) {
       status_ = rs_.iter_->status();
       valid_ = false;
       return;
     }
-
     // we're done with rs_.iter_
     has_current_user_key_ = false;
+    current_user_key_.assign("", 0);
+    current_user_sequence_ = kMaxSequenceNumber;
     delete rs_.iter_;
     rs_.iter_ = NULL;
     {
       MutexLock l(mutex_);
       if (mems_.empty() ||
-          rs_.seq_start_ < mems_.front().seq_start_) {
+          rs_.seq_limit_ < mems_.front().seq_start_) {
         rs_.seq_start_ = rs_.seq_limit_;
       } else {
         if (rs_.mem_) {
@@ -191,8 +193,8 @@ void ReplayIteratorImpl::Prime() {
     rs_.seq_limit_ = db_->LastSequence();
     rs_.iter_ = rs_.mem_->NewIterator();
     rs_.iter_->SeekToFirst();
-    if (rs_.seq_start_ >= rs_.seq_limit_) {
-      rs_.iter_->SeekToLast();
+    assert(rs_.seq_start_ <= rs_.seq_limit_);
+    if (rs_.seq_start_ == rs_.seq_limit_) {
       valid_ = false;
       return;
     }

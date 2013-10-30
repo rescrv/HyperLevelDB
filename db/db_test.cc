@@ -2064,14 +2064,24 @@ TEST(DBTest, Replay) {
   ASSERT_OK(Put("key", "v8"));
   ASSERT_OK(Put("key", "v9"));
 
-  // iterate
+  // get the iterator
   ReplayIterator* iter = NULL;
   ASSERT_OK(db_->GetReplayIterator(ts, &iter));
+
+  // Iterate over what was there to start with
   ASSERT_TRUE(iter->Valid());
   ASSERT_TRUE(iter->HasValue());
   ASSERT_EQ("key", iter->key().ToString());
   ASSERT_EQ("v9", iter->value().ToString());
   iter->Next();
+  // The implementation is allowed to return things twice.
+  // This is a case where it will.
+  ASSERT_TRUE(iter->Valid());
+  ASSERT_TRUE(iter->HasValue());
+  ASSERT_EQ("key", iter->key().ToString());
+  ASSERT_EQ("v9", iter->value().ToString());
+  iter->Next();
+  // Now it's no longer valid.
   ASSERT_TRUE(!iter->Valid());
   ASSERT_TRUE(!iter->Valid());
 

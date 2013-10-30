@@ -1535,6 +1535,7 @@ Status DBImpl::SequenceWriteBegin(Writer* w, WriteBatch* updates) {
   straight_reads_ = 0;
   bool force = updates == NULL;
   bool allow_delay = !force;
+  bool enqueue_mem = false;
   w->old_log.reset();
   w->old_logfile.reset();
 
@@ -1576,10 +1577,7 @@ Status DBImpl::SequenceWriteBegin(Writer* w, WriteBatch* updates) {
       mem_ = new MemTable(internal_comparator_);
       mem_->Ref();
       force = false;   // Do not force another compaction if have room
-      for (std::list<ReplayIteratorImpl*>::iterator it = replay_iters_.begin();
-          it != replay_iters_.end(); ++it) {
-        (*it)->enqueue(mem_, versions_->LastSequence());
-      }
+      enqueue_mem = true;
       break;
     }
   }
@@ -1595,6 +1593,13 @@ Status DBImpl::SequenceWriteBegin(Writer* w, WriteBatch* updates) {
     w->log = log_;
     w->mem = mem_;
     w->mem->Ref();
+  }
+
+  if (enqueue_mem) {
+    for (std::list<ReplayIteratorImpl*>::iterator it = replay_iters_.begin();
+        it != replay_iters_.end(); ++it) {
+      (*it)->enqueue(mem_, w->start_sequence);
+    }
   }
 
   return s;
