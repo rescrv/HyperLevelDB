@@ -58,27 +58,40 @@ AC_FUNC_MMAP
 AC_CHECK_FUNCS([alarm clock_gettime mach_absolute_time ftruncate memmove mkdir munmap rmdir socket])
 
 # Optional components
+snappy_detect_hdr=yes
+snappy_detect_lib=yes
+AC_CHECK_LIB([snappy], [snappy_compress], [], [snappy_detect_hdr=no])
+AC_CHECK_HEADER([snappy.h],,[snappy_detect_lib=no])
 AC_ARG_ENABLE([snappy], [AS_HELP_STRING([--enable-snappy],
-              [build with Snappy @<:@default: no@:>@])],
+              [build with Snappy @<:@default: auto@:>@])],
               [snappy=${enableval}], [snappy=no])
 if test x"${snappy}" = xyes; then
-    AC_CHECK_LIB([snappy], [snappy_compress], [], [AC_MSG_ERROR([
+    if test x"${snappy_detect_hdr}" != xyes; then
+        AC_MSG_ERROR([
 -------------------------------------------------
 LevelDB configured with the Snappy library.
 libsnappy.so not found
 Please install Snappy to continue.
--------------------------------------------------])])
-    AC_CHECK_HEADER([snappy.h],,[AC_MSG_ERROR([
+-------------------------------------------------])
+    fi
+    if test x"${snappy_detect_lib}" != xyes; then
+        AC_MSG_ERROR([
 -------------------------------------------------
 LevelDB configured with the Snappy library.
 snappy.h not found
 Please install Snappy to continue.
--------------------------------------------------])])
-SNAPPY=-lsnappy
-else
-SNAPPY=
+-------------------------------------------------])
+    fi
 fi
-AC_SUBST(SNAPPY)
+if test x"${snappy_detect_hdr}" = xyes -a x"${snappy_detect_lib}" = xyes; then
+SNAPPY_FLAGS=-DSNAPPY
+SNAPPY_LIBS=-lsnappy
+else
+SNAPPY_FLAGS=
+SNAPPY_LIBS=
+fi
+AC_SUBST(SNAPPY_FLAGS)
+AC_SUBST(SNAPPY_LIBS)
 
 AC_CONFIG_FILES([Makefile libhyperleveldb.pc])
 AC_OUTPUT

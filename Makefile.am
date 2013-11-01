@@ -26,8 +26,8 @@
 ## POSSIBILITY OF SUCH DAMAGE.
 
 ACLOCAL_AMFLAGS = -I m4 ${ACLOCAL_FLAGS}
-AM_CFLAGS = -DLEVELDB_PLATFORM_POSIX -fno-builtin-memcmp -fno-builtin-memmove
-AM_CXXFLAGS = -DLEVELDB_PLATFORM_POSIX -fno-builtin-memcmp -fno-builtin-memmove
+AM_CFLAGS = -DLEVELDB_PLATFORM_POSIX $(SNAPPY_FLAGS) -fno-builtin-memcmp -fno-builtin-memmove
+AM_CXXFLAGS = -DLEVELDB_PLATFORM_POSIX $(SNAPPY_FLAGS) -fno-builtin-memcmp -fno-builtin-memmove
 AM_MAKEFLAGS = --no-print-directory
 
 pkgconfigdir = $(libdir)/pkgconfig
@@ -149,7 +149,7 @@ libhyperleveldb_la_SOURCES += util/logging.cc
 libhyperleveldb_la_SOURCES += util/options.cc
 libhyperleveldb_la_SOURCES += util/status.cc
 libhyperleveldb_la_SOURCES += port/port_posix.cc
-libhyperleveldb_la_LIBADD = $(SNAPPY)
+libhyperleveldb_la_LIBADD = $(SNAPPY_LIBS)
 libhyperleveldb_la_LDFLAGS = -pthread
 
 TESTUTIL = util/testutil.cc
