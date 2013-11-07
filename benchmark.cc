@@ -65,6 +65,7 @@ static long _done = 0;
 static long _number = 1000000;
 static long _threads = 1;
 static long _backup = 0;
+static long _write_buf = 64ULL * 1024ULL * 1024ULL;
 static const char* _output = "benchmark.log";
 static const char* _dir = ".";
 
@@ -87,6 +88,9 @@ main(int argc, const char* argv[])
     ap.arg().name('d', "db-dir")
             .description("directory for leveldb storage (default: .)")
             .as_string(&_dir);
+    ap.arg().name('w', "write-buffer")
+            .description("write buffer size (default: 64MB)")
+            .as_long(&_write_buf);
     ap.arg().name('b', "backup")
             .description("perform a live backup every N seconds (default: 0 (no backup))")
             .as_long(&_backup);
@@ -102,7 +106,7 @@ main(int argc, const char* argv[])
 
     leveldb::Options opts;
     opts.create_if_missing = true;
-    opts.write_buffer_size = 64ULL * 1024ULL * 1024ULL;
+    opts.write_buffer_size = write_buf;
     opts.filter_policy = leveldb::NewBloomFilterPolicy(10);
     leveldb::DB* db;
     leveldb::Status st = leveldb::DB::Open(opts, _dir, &db);
