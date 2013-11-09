@@ -1717,7 +1717,14 @@ void DBImpl::GetApproximateSizes(
   }
 }
 
-Status DBImpl::LiveBackup(const Slice& name) {
+Status DBImpl::LiveBackup(const Slice& _name) {
+  Slice name = _name;
+  size_t name_sz = 0;
+
+  for (; name_sz < name.size() && name.data()[name_sz] != '\0'; ++name_sz)
+      ;
+
+  name = Slice(name.data(), name_sz);
   std::set<uint64_t> live;
   uint64_t ticket = __sync_add_and_fetch(&writers_upper_, 1);
 
