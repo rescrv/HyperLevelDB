@@ -1067,9 +1067,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   } else {
     compact->smallest_snapshot = snapshots_.oldest()->number_;
   }
-  if (compact->smallest_snapshot > manual_garbage_cutoff_) {
-    compact->smallest_snapshot = manual_garbage_cutoff_;
-  }
 
   // Release mutex while we're actually doing the compaction work
   mutex_.Unlock();
@@ -1118,6 +1115,15 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
         //     few iterations of this loop (by rule (A) above).
         // Therefore this deletion marker is obsolete and can be dropped.
         drop = true;
+      }
+
+      // If we're going to drop this key, and there was no previous version of
+      // this key, and it was written at or after the garbage cutoff, we keep
+      // it.
+      if (drop &&
+          last_sequence_for_key == kMaxSequenceNumber  &&
+          ikey.sequence >= manual_garbage_cutoff_) {
+        drop = false;
       }
 
       last_sequence_for_key = ikey.sequence;
