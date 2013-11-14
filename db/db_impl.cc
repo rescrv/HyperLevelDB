@@ -1436,7 +1436,7 @@ Status DBImpl::GetReplayIterator(const std::string& timestamp,
 
 void DBImpl::ReleaseReplayIterator(ReplayIterator* _iter) {
   MutexLock l(&mutex_);
-  ReplayIteratorImpl* iter = dynamic_cast<ReplayIteratorImpl*>(_iter);
+  ReplayIteratorImpl* iter = reinterpret_cast<ReplayIteratorImpl*>(_iter);
   for (std::list<ReplayIteratorImpl*>::iterator it = replay_iters_.begin();
       it != replay_iters_.end(); ++it) {
     if (*it == iter) {
