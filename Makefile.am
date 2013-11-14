@@ -149,7 +149,7 @@ libhyperleveldb_la_SOURCES += util/logging.cc
 libhyperleveldb_la_SOURCES += util/options.cc
 libhyperleveldb_la_SOURCES += util/status.cc
 libhyperleveldb_la_SOURCES += port/port_posix.cc
-libhyperleveldb_la_LIBADD = $(SNAPPY_LIBS)
+libhyperleveldb_la_LIBADD = $(SNAPPY_LIBS) -lpthread
 libhyperleveldb_la_LDFLAGS = -pthread
 
 TESTUTIL = util/testutil.cc
