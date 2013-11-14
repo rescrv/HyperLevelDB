@@ -93,5 +93,5 @@ fi
 AC_SUBST(SNAPPY_FLAGS)
 AC_SUBST(SNAPPY_LIBS)
 
-AC_CONFIG_FILES([Makefile libhyperleveldb.pc])
+AC_CONFIG_FILES([Makefile libhyperleveldb.pc hyperleveldb.upack])
 AC_OUTPUT
