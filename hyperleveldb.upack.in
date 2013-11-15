@@ -1,6 +1,6 @@
 package hyperleveldb
+| source="hyperleveldb"
 | debian name="libhyperleveldb0"
-| debian source="hyperleveldb"
 | version="@VERSION@"
 | release="1"
 | license="BSD"
