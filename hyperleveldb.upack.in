@@ -38,5 +38,4 @@ subpackage hyperleveldb-devel
 + {libdir}/libhyperleveldb.so
 + {libdir}/pkgconfig/libhyperleveldb.pc
 
-exclude {libdir}/libhyperleveldb.a
 exclude {libdir}/libhyperleveldb.la
