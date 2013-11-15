@@ -9,8 +9,6 @@ package hyperleveldb
 | tarball="http://hyperdex.org/src/hyperleveldb-{version}.tar.gz"
 | debian section="libs"
 | configure="--disable-static"
-| debian build-requires="libsnappy-dev"
-| fedora build-requires="snappy-devel"
 | summary="A fast key-value storage library"
 + {libdir}/libhyperleveldb.so.0
 + {libdir}/libhyperleveldb.so.0.0.0
