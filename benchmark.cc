@@ -106,7 +106,7 @@ main(int argc, const char* argv[])
 
     leveldb::Options opts;
     opts.create_if_missing = true;
-    opts.write_buffer_size = write_buf;
+    opts.write_buffer_size = _write_buf;
     opts.filter_policy = leveldb::NewBloomFilterPolicy(10);
     leveldb::DB* db;
     leveldb::Status st = leveldb::DB::Open(opts, _dir, &db);

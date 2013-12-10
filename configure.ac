@@ -46,16 +46,25 @@ AC_LANG(C++)
 
 ANAL_WARNINGS_CXX
 
+EXTRA_CFLAGS=""
+AX_CHECK_COMPILE_FLAG([-fno-builtin-memcmp],[EXTRA_CFLAGS="-fno-builtin-memcmp"],,)
+AX_CHECK_COMPILE_FLAG([-fno-builtin-memmove],[EXTRA_CFLAGS="${EXTRA_CFLAGS} -fno-builtin-memcmp"],,)
+AC_SUBST([EXTRA_CFLAGS], [${EXTRA_CFLAGS}])
+
 # Checks for libraries.
 
 # Checks for header files.
+AC_CHECK_HEADERS([endian.h machine/endian.h sys/endian.h sys/isa_defs.h sys/types.h])
 
 # Checks for typedefs, structures, and compiler characteristics.
 
 # Checks for library functions.
 AC_FUNC_ERROR_AT_LINE
 AC_FUNC_MMAP
-AC_CHECK_FUNCS([alarm clock_gettime mach_absolute_time ftruncate memmove mkdir munmap rmdir socket])
+AC_CHECK_FUNCS([alarm clock_gettime mach_absolute_time ftruncate fsync])
+AC_CHECK_FUNCS([fread fread_unlocked fwrite fwrite_unlocked fflush])
+AC_CHECK_FUNCS([fflush_unlocked memmove mkdir munmap rmdir socket])
+AC_CHECK_DECLS([fdatasync])
 
 # Optional components
 snappy_detect_hdr=yes

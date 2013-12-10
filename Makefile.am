@@ -26,8 +26,8 @@
 ## POSSIBILITY OF SUCH DAMAGE.
 
 ACLOCAL_AMFLAGS = -I m4 ${ACLOCAL_FLAGS}
-AM_CFLAGS = -DLEVELDB_PLATFORM_POSIX $(SNAPPY_FLAGS) -fno-builtin-memcmp -fno-builtin-memmove
-AM_CXXFLAGS = -DLEVELDB_PLATFORM_POSIX $(SNAPPY_FLAGS) -fno-builtin-memcmp -fno-builtin-memmove
+AM_CFLAGS = -DLEVELDB_PLATFORM_POSIX $(SNAPPY_FLAGS) ${EXTRA_CFLAGS}
+AM_CXXFLAGS = -DLEVELDB_PLATFORM_POSIX $(SNAPPY_FLAGS) ${EXTRA_CFLAGS}
 AM_MAKEFLAGS = --no-print-directory
 
 pkgconfigdir = $(libdir)/pkgconfig
@@ -158,6 +158,7 @@ TESTHARNESS = util/testharness.cc $(TESTUTIL)
 noinst_PROGRAMS =
 noinst_PROGRAMS += db_bench
 noinst_PROGRAMS += leveldbutil
+noinst_PROGRAMS += leveldb-verify
 
 EXTRA_PROGRAMS =
 EXTRA_PROGRAMS += benchmark
@@ -204,6 +205,9 @@ db_bench_tree_db_LDADD = -lkyotocabinet
 
 leveldbutil_SOURCES = db/leveldb_main.cc
 leveldbutil_LDADD = libhyperleveldb.la -lpthread
+
+leveldb_verify_SOURCES = leveldb-verify.cc
+leveldb_verify_LDADD = libhyperleveldb.la -lpthread
 
 autocompact_test_SOURCES = db/autocompact_test.cc $(TESTHARNESS)
 autocompact_test_LDADD = libhyperleveldb.la -lpthread

@@ -22,6 +22,7 @@
 /hyperleveldb.upack
 /install-sh
 /leveldbutil
+/leveldb-verify
 /libhyperleveldb.pc
 /libtool
 /ltmain.sh

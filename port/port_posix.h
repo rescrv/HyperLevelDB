@@ -7,38 +7,41 @@
 #ifndef STORAGE_LEVELDB_PORT_PORT_POSIX_H_
 #define STORAGE_LEVELDB_PORT_PORT_POSIX_H_
 
+#if HAVE_CONFIG_H
+#include "config.h"
+#endif
+
+#if HAVE_ENDIAN_H
+#include <endian.h>
+#endif
+
+#if HAVE_MACHINE_ENDIAN_H
+#include <machine/endian.h>
+#endif
+
+#if HAVE_SYS_ENDIAN_H
+#include <sys/endian.h>
+#endif
+
+#if HAVE_SYS_ISA_DEFS_H
+#include <sys/isa_defs.h>
+#endif
+
+#if HAVE_SYS_ENDIAN_H
+#include <sys/types.h>
+#endif
+
 #undef PLATFORM_IS_LITTLE_ENDIAN
-#if defined(OS_MACOSX)
-  #include <machine/endian.h>
-  #if defined(__DARWIN_LITTLE_ENDIAN) && defined(__DARWIN_BYTE_ORDER)
-    #define PLATFORM_IS_LITTLE_ENDIAN \
-        (__DARWIN_BYTE_ORDER == __DARWIN_LITTLE_ENDIAN)
-  #endif
-#elif defined(OS_SOLARIS)
-  #include <sys/isa_defs.h>
-  #ifdef _LITTLE_ENDIAN
-    #define PLATFORM_IS_LITTLE_ENDIAN true
-  #else
-    #define PLATFORM_IS_LITTLE_ENDIAN false
-  #endif
-#elif defined(OS_FREEBSD)
-  #include <sys/types.h>
-  #include <sys/endian.h>
-  #define PLATFORM_IS_LITTLE_ENDIAN (_BYTE_ORDER == _LITTLE_ENDIAN)
-#elif defined(OS_OPENBSD) || defined(OS_NETBSD) ||\
-      defined(OS_DRAGONFLYBSD)
-  #include <sys/types.h>
-  #include <sys/endian.h>
-#elif defined(OS_HPUX)
-  #define PLATFORM_IS_LITTLE_ENDIAN false
-#elif defined(OS_ANDROID)
+
+#if defined(__DARWIN_LITTLE_ENDIAN) && defined(__DARWIN_BYTE_ORDER)
+# define PLATFORM_IS_LITTLE_ENDIAN (__DARWIN_BYTE_ORDER == __DARWIN_LITTLE_ENDIAN)
+#elif defined(_BYTE_ORDER) && defined(_LITTLE_ENDIAN)
   // Due to a bug in the NDK x86 <sys/endian.h> definition,
   // _BYTE_ORDER must be used instead of __BYTE_ORDER on Android.
   // See http://code.google.com/p/android/issues/detail?id=39824
-  #include <endian.h>
-  #define PLATFORM_IS_LITTLE_ENDIAN  (_BYTE_ORDER == _LITTLE_ENDIAN)
-#else
-  #include <endian.h>
+# define PLATFORM_IS_LITTLE_ENDIAN (_BYTE_ORDER == _LITTLE_ENDIAN)
+#elif defined(_LITTLE_ENDIAN)
+# define PLATFORM_IS_LITTLE_ENDIAN true
 #endif
 
 #include <pthread.h>
@@ -53,25 +56,36 @@
 #define PLATFORM_IS_LITTLE_ENDIAN (__BYTE_ORDER == __LITTLE_ENDIAN)
 #endif
 
-#if defined(OS_MACOSX) || defined(OS_SOLARIS) || defined(OS_FREEBSD) ||\
-    defined(OS_NETBSD) || defined(OS_OPENBSD) || defined(OS_DRAGONFLYBSD) ||\
-    defined(OS_ANDROID) || defined(OS_HPUX)
-// Use fread/fwrite/fflush on platforms without _unlocked variants
-#define fread_unlocked fread
-#define fwrite_unlocked fwrite
+#if HAVE_FFLUSH_UNLOCKED
+// do nothing
+#elif HAVE_FFLUSH
 #define fflush_unlocked fflush
+#else
+#error "no fflush found"
 #endif
 
-#if defined(OS_MACOSX) || defined(OS_FREEBSD) ||\
-    defined(OS_OPENBSD) || defined(OS_DRAGONFLYBSD)
-// Use fsync() on platforms without fdatasync()
-#define fdatasync fsync
+#if HAVE_FREAD_UNLOCKED
+// do nothing
+#elif HAVE_FREAD
+#define fread_unlocked fread
+#else
+#error "no fread found"
 #endif
 
-#if defined(OS_ANDROID) && __ANDROID_API__ < 9
-// fdatasync() was only introduced in API level 9 on Android. Use fsync()
-// when targetting older platforms.
+#if HAVE_FWRITE_UNLOCKED
+// do nothing
+#elif HAVE_FWRITE
+#define fwrite_unlocked fwrite
+#else
+#error "no fwrite found"
+#endif
+
+#if HAVE_DECL_FDATASYNC
+// do nothing
+#elif HAVE_FSYNC
 #define fdatasync fsync
+#else
+#error "no fdatasync/fsync found"
 #endif
 
 namespace leveldb {

@@ -930,7 +930,7 @@ Status DBImpl::OptimisticCompaction() {
       break;
     }
   }
-  Log(options_.info_log, "Optimistic compaction ended after %ld iterations", iters);
+  Log(options_.info_log, "Optimistic compaction ended after %llu iterations", iters);
   return Status::OK();
 }
 
