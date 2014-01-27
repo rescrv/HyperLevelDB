@@ -164,14 +164,13 @@ void DBIter::Next() {
       saved_key_.clear();
       return;
     }
+    // saved_key_ already contains the key to skip past.
   } else {
-    // if we did not reverse direction, save the current key as the one which we
-    // must advance past.  If we did reverse direction, it's already been set,
-    // so we don't need to do it.  This conditional solves upstream issue #200.
-    SaveKey(ExtractUserKey(iter_->key()), skip);
+    // Store in saved_key_ the current key so we skip it below.
+    SaveKey(ExtractUserKey(iter_->key()), &saved_key_);
   }
 
-  FindNextUserEntry(true, skip);
+  FindNextUserEntry(true, &saved_key_);
 }
 
 void DBIter::FindNextUserEntry(bool skipping, std::string* skip) {

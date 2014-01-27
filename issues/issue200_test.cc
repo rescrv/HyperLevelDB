@@ -1,69 +1,58 @@
-// Test for issue 200: iterator reversal brings in keys newer than snapshots
-#include <iostream>
-#include <sstream>
-#include <cstdlib>
+// Copyright (c) 2013 The LevelDB Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file. See the AUTHORS file for names of contributors.
+
+// Test for issue 200: when iterator switches direction from backward
+// to forward, the current key can be yielded unexpectedly if a new
+// mutation has been added just before the current key.
 
 #include "hyperleveldb/db.h"
-#include "hyperleveldb/write_batch.h"
 #include "util/testharness.h"
 
-namespace {
+namespace leveldb {
 
 class Issue200 { };
 
 TEST(Issue200, Test) {
   // Get rid of any state from an old run.
-  std::string dbpath = leveldb::test::TmpDir() + "/leveldb_200_iterator_test";
-  DestroyDB(dbpath, leveldb::Options());
+  std::string dbpath = test::TmpDir() + "/leveldb_issue200_test";
+  DestroyDB(dbpath, Options());
 
-  // Open database.
-  leveldb::DB* db;
-  leveldb::Options db_options;
-  db_options.create_if_missing = true;
-  db_options.compression = leveldb::kNoCompression;
-  ASSERT_OK(leveldb::DB::Open(db_options, dbpath, &db));
+  DB *db;
+  Options options;
+  options.create_if_missing = true;
+  ASSERT_OK(DB::Open(options, dbpath, &db));
 
-  leveldb::WriteOptions write_options;
-  db->Put(write_options, leveldb::Slice("1", 1), leveldb::Slice("b", 1));
-  db->Put(write_options, leveldb::Slice("2", 1), leveldb::Slice("c", 1));
-  db->Put(write_options, leveldb::Slice("3", 1), leveldb::Slice("d", 1));
-  db->Put(write_options, leveldb::Slice("4", 1), leveldb::Slice("e", 1));
-  db->Put(write_options, leveldb::Slice("5", 1), leveldb::Slice("f", 1));
+  WriteOptions write_options;
+  ASSERT_OK(db->Put(write_options, "1", "b"));
+  ASSERT_OK(db->Put(write_options, "2", "c"));
+  ASSERT_OK(db->Put(write_options, "3", "d"));
+  ASSERT_OK(db->Put(write_options, "4", "e"));
+  ASSERT_OK(db->Put(write_options, "5", "f"));
 
-  const leveldb::Snapshot *snapshot = db->GetSnapshot();
+  ReadOptions read_options;
+  Iterator *iter = db->NewIterator(read_options);
 
-  leveldb::ReadOptions read_options;
-  read_options.snapshot = snapshot;
-  leveldb::Iterator *iter = db->NewIterator(read_options);
+  // Add an element that should not be reflected in the iterator.
+  ASSERT_OK(db->Put(write_options, "25", "cd"));
 
-  // Commenting out this Put changes the iterator behavior,
-  // gives the expected behavior. This is unexpected because
-  // the iterator is taken on a snapshot that was taken
-  // before the Put
-  db->Put(write_options, leveldb::Slice("25", 2), leveldb::Slice("cd", 2));
-
-  iter->Seek(leveldb::Slice("5", 1));
-  ASSERT_EQ("5", iter->key().ToString());
+  iter->Seek("5");
+  ASSERT_EQ(iter->key().ToString(), "5");
   iter->Prev();
-  ASSERT_EQ("4", iter->key().ToString());
+  ASSERT_EQ(iter->key().ToString(), "4");
   iter->Prev();
-  ASSERT_EQ("3", iter->key().ToString());
-
-  // At this point the iterator is at "3", I expect the Next() call will
-  // move it to "4". But it stays on "3"
+  ASSERT_EQ(iter->key().ToString(), "3");
   iter->Next();
-  ASSERT_EQ("4", iter->key().ToString());
+  ASSERT_EQ(iter->key().ToString(), "4");
   iter->Next();
-  ASSERT_EQ("5", iter->key().ToString());
+  ASSERT_EQ(iter->key().ToString(), "5");
 
-  // close database
   delete iter;
-  db->ReleaseSnapshot(snapshot);
   delete db;
-  DestroyDB(dbpath, leveldb::Options());
+  DestroyDB(dbpath, options);
 }
 
-}  // anonymous namespace
+}  // namespace leveldb
 
 int main(int argc, char** argv) {
   return leveldb::test::RunAllTests();
