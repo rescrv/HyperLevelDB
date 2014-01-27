@@ -162,6 +162,8 @@ class SpecialEnv : public EnvWrapper {
     if (s.ok()) {
       if (strstr(f.c_str(), ".ldb") != NULL) {
         *r = new SSTableFile(this, *r);
+      } else if (strstr(f.c_str(), ".sst") != NULL) {
+        *r = new SSTableFile(this, *r);
       } else if (strstr(f.c_str(), "MANIFEST") != NULL) {
         *r = new ManifestFile(this, *r);
       }

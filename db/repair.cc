@@ -260,11 +260,11 @@ class Repairer {
   }
 
   Status ScanTable(TableInfo* t) {
-    std::string fname = TableFileName(dbname_, t->meta.number);
+    std::string fname = SSTTableFileName(dbname_, t->meta.number);
     int counter = 0;
     Status status = env_->GetFileSize(fname, &t->meta.file_size);
     if (!status.ok()) {
-      fname = SSTTableFileName(dbname_, t->meta.number);
+      fname = TableFileName(dbname_, t->meta.number);
       Status s2 = env_->GetFileSize(fname, &t->meta.file_size);
       if (s2.ok())
         status = Status::OK();
