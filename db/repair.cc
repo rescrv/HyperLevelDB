@@ -248,7 +248,7 @@ class Repairer {
       t.meta.number = table_numbers_[i];
       Status status = ScanTable(&t);
       if (!status.ok()) {
-        std::string fname = TableFileName(dbname_, table_numbers_[i]);
+        std::string fname = SSTTableFileName(dbname_, table_numbers_[i]);
         Log(options_.info_log, "Table #%llu: ignoring %s",
             (unsigned long long) table_numbers_[i],
             status.ToString().c_str());

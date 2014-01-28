@@ -493,7 +493,7 @@ class DBTest {
     FileType type;
     for (size_t i = 0; i < filenames.size(); i++) {
       if (ParseFileName(filenames[i], &number, &type) && type == kTableFile) {
-        ASSERT_OK(env_->DeleteFile(TableFileName(dbname_, number)));
+        ASSERT_OK(env_->DeleteFile(SSTTableFileName(dbname_, number)));
         return true;
       }
     }
@@ -509,8 +509,8 @@ class DBTest {
     int files_renamed = 0;
     for (size_t i = 0; i < filenames.size(); i++) {
       if (ParseFileName(filenames[i], &number, &type) && type == kTableFile) {
-        const std::string from = TableFileName(dbname_, number);
-        const std::string to = SSTTableFileName(dbname_, number);
+        const std::string from = SSTTableFileName(dbname_, number);
+        const std::string to = TableFileName(dbname_, number);
         ASSERT_OK(env_->RenameFile(from, to));
         files_renamed++;
       }
