@@ -1004,6 +1004,8 @@ TEST(DBTest, CompactionsGenerateMultipleFiles) {
   }
 }
 
+#if 0
+// In HyperLevelDB, this test is useless because we have no "max files" cap.
 TEST(DBTest, RepeatedWritesToSameKey) {
   Options options = CurrentOptions();
   options.env = env_;
@@ -1022,6 +1024,7 @@ TEST(DBTest, RepeatedWritesToSameKey) {
     fprintf(stderr, "after %d: %d files\n", int(i+1), TotalTableFiles());
   }
 }
+#endif
 
 TEST(DBTest, SparseMerge) {
   Options options = CurrentOptions();
