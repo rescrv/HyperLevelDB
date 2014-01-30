@@ -54,6 +54,8 @@ ANAL_WARNINGS_CXX
 EXTRA_CFLAGS=""
 AX_CHECK_COMPILE_FLAG([-fno-builtin-memcmp],[EXTRA_CFLAGS="-fno-builtin-memcmp"],,)
 AX_CHECK_COMPILE_FLAG([-fno-builtin-memmove],[EXTRA_CFLAGS="${EXTRA_CFLAGS} -fno-builtin-memcmp"],,)
+AX_CHECK_COMPILE_FLAG([-Qunused-arguments],[EXTRA_CFLAGS="${EXTRA_CFLAGS} -Qunused-arguments"],,)
+AX_CHECK_COMPILE_FLAG([-Wno-unknown-warning-option],[EXTRA_CFLAGS="${EXTRA_CFLAGS} -Wno-unknown-warning-option"],,)
 AC_SUBST([EXTRA_CFLAGS], [${EXTRA_CFLAGS}])
 
 # Checks for libraries.
