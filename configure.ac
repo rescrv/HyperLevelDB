@@ -26,12 +26,17 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 #                                               -*- Autoconf -*-
-#
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.62])
 AC_INIT([hyperleveldb], [1.0.1], [robert@hyperdex.org])
-AM_INIT_AUTOMAKE([foreign subdir-objects dist-bzip2])
+m4_define([serial_tests], [
+    m4_esyscmd([case `automake --version | head -n 1` in
+                *1.11*);;
+                *) echo serial-tests;;
+                esac])
+])
+AM_INIT_AUTOMAKE(foreign serial_tests subdir-objects dist-bzip2)
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 LT_PREREQ([2.2])
 LT_INIT
@@ -49,6 +54,8 @@ ANAL_WARNINGS_CXX
 EXTRA_CFLAGS=""
 AX_CHECK_COMPILE_FLAG([-fno-builtin-memcmp],[EXTRA_CFLAGS="-fno-builtin-memcmp"],,)
 AX_CHECK_COMPILE_FLAG([-fno-builtin-memmove],[EXTRA_CFLAGS="${EXTRA_CFLAGS} -fno-builtin-memcmp"],,)
+AX_CHECK_COMPILE_FLAG([-Qunused-arguments],[EXTRA_CFLAGS="${EXTRA_CFLAGS} -Qunused-arguments"],,)
+AX_CHECK_COMPILE_FLAG([-Wno-unknown-warning-option],[EXTRA_CFLAGS="${EXTRA_CFLAGS} -Wno-unknown-warning-option"],,)
 AC_SUBST([EXTRA_CFLAGS], [${EXTRA_CFLAGS}])
 
 # Checks for libraries.

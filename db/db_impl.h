@@ -8,7 +8,11 @@
 #include <deque>
 #include <list>
 #include <set>
+#ifdef _LIBCPP_VERSION
+#include <memory>
+#else
 #include <tr1/memory>
+#endif
 #include "db/dbformat.h"
 #include "db/log_writer.h"
 #include "db/replay_iterator.h"
@@ -19,6 +23,11 @@
 #include "port/thread_annotations.h"
 
 namespace leveldb {
+#ifdef _LIBCPP_VERSION
+#define SHARED_PTR std::shared_ptr
+#else
+#define SHARED_PTR std::tr1::shared_ptr
+#endif
 
 class MemTable;
 class TableCache;
@@ -160,9 +169,9 @@ class DBImpl : public DB {
   MemTable* mem_;
   MemTable* imm_;                // Memtable being compacted
   port::AtomicPointer has_imm_;  // So bg thread can detect non-NULL imm_
-  std::tr1::shared_ptr<WritableFile> logfile_;
+  SHARED_PTR<WritableFile> logfile_;
   uint64_t logfile_number_;
-  std::tr1::shared_ptr<log::Writer> log_;
+  SHARED_PTR<log::Writer> log_;
   uint32_t seed_;                // For sampling.
 
   // Synchronize writers

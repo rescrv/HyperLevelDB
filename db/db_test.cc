@@ -160,7 +160,9 @@ class SpecialEnv : public EnvWrapper {
 
     Status s = target()->NewWritableFile(f, r);
     if (s.ok()) {
-      if (strstr(f.c_str(), ".sst") != NULL) {
+      if (strstr(f.c_str(), ".ldb") != NULL) {
+        *r = new SSTableFile(this, *r);
+      } else if (strstr(f.c_str(), ".sst") != NULL) {
         *r = new SSTableFile(this, *r);
       } else if (strstr(f.c_str(), "MANIFEST") != NULL) {
         *r = new ManifestFile(this, *r);
@@ -491,11 +493,29 @@ class DBTest {
     FileType type;
     for (size_t i = 0; i < filenames.size(); i++) {
       if (ParseFileName(filenames[i], &number, &type) && type == kTableFile) {
-        ASSERT_OK(env_->DeleteFile(TableFileName(dbname_, number)));
+        ASSERT_OK(env_->DeleteFile(SSTTableFileName(dbname_, number)));
         return true;
       }
     }
     return false;
+  }
+
+  // Returns number of files renamed.
+  int RenameLDBToSST() {
+    std::vector<std::string> filenames;
+    ASSERT_OK(env_->GetChildren(dbname_, &filenames));
+    uint64_t number;
+    FileType type;
+    int files_renamed = 0;
+    for (size_t i = 0; i < filenames.size(); i++) {
+      if (ParseFileName(filenames[i], &number, &type) && type == kTableFile) {
+        const std::string from = SSTTableFileName(dbname_, number);
+        const std::string to = TableFileName(dbname_, number);
+        ASSERT_OK(env_->RenameFile(from, to));
+        files_renamed++;
+      }
+    }
+    return files_renamed;
   }
 };
 
@@ -984,6 +1004,8 @@ TEST(DBTest, CompactionsGenerateMultipleFiles) {
   }
 }
 
+#if 0
+// In HyperLevelDB, this test is useless because we have no "max files" cap.
 TEST(DBTest, RepeatedWritesToSameKey) {
   Options options = CurrentOptions();
   options.env = env_;
@@ -1002,6 +1024,7 @@ TEST(DBTest, RepeatedWritesToSameKey) {
     fprintf(stderr, "after %d: %d files\n", int(i+1), TotalTableFiles());
   }
 }
+#endif
 
 TEST(DBTest, SparseMerge) {
   Options options = CurrentOptions();
@@ -1641,6 +1664,22 @@ TEST(DBTest, MissingSSTFile) {
   ASSERT_TRUE(!s.ok());
   ASSERT_TRUE(s.ToString().find("issing") != std::string::npos)
       << s.ToString();
+}
+
+TEST(DBTest, StillReadSST) {
+  ASSERT_OK(Put("foo", "bar"));
+  ASSERT_EQ("bar", Get("foo"));
+
+  // Dump the memtable to disk.
+  dbfull()->TEST_CompactMemTable();
+  ASSERT_EQ("bar", Get("foo"));
+  Close();
+  ASSERT_GT(RenameLDBToSST(), 0);
+  Options options = CurrentOptions();
+  options.paranoid_checks = true;
+  Status s = TryReopen(&options);
+  ASSERT_TRUE(s.ok());
+  ASSERT_EQ("bar", Get("foo"));
 }
 
 TEST(DBTest, FilesDeletedAfterCompaction) {

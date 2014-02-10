@@ -360,7 +360,7 @@ Status DBImpl::Recover(VersionEdit* edit) {
       char buf[50];
       snprintf(buf, sizeof(buf), "%d missing files; e.g.",
                static_cast<int>(expected.size()));
-      return Status::Corruption(buf, TableFileName(dbname_, *(expected.begin())));
+      return Status::Corruption(buf, SSTTableFileName(dbname_, *(expected.begin())));
     }
 
     // Recover in the order in which the logs were generated
@@ -968,7 +968,7 @@ Status DBImpl::OpenCompactionOutputFile(CompactionState* compact) {
   }
 
   // Make the output file
-  std::string fname = TableFileName(dbname_, file_number);
+  std::string fname = SSTTableFileName(dbname_, file_number);
   Status s = env_->NewWritableFile(fname, &compact->outfile);
   if (s.ok()) {
     compact->builder = new TableBuilder(options_, compact->outfile);
@@ -1487,11 +1487,11 @@ struct DBImpl::Writer {
   Writer* next;
   uint64_t start_sequence;
   uint64_t end_sequence;
-  std::tr1::shared_ptr<WritableFile> logfile;
-  std::tr1::shared_ptr<log::Writer> log;
+  SHARED_PTR<WritableFile> logfile;
+  SHARED_PTR<log::Writer> log;
   MemTable* mem;
-  std::tr1::shared_ptr<WritableFile> old_logfile;
-  std::tr1::shared_ptr<log::Writer> old_log;
+  SHARED_PTR<WritableFile> old_logfile;
+  SHARED_PTR<log::Writer> old_log;
 
   explicit Writer()
     : mtx(),
