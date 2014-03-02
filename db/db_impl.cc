@@ -126,9 +126,9 @@ DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
       seed_(0),
       writers_lower_(0),
       writers_upper_(0),
-      bg_fg_cv_(&mutex_),
       allow_background_activity_(false),
       num_bg_threads_(0),
+      bg_fg_cv_(&mutex_),
       bg_compaction_cv_(&mutex_),
       bg_memtable_cv_(&mutex_),
       bg_optimistic_trip_(false),
@@ -1078,7 +1078,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   std::string current_user_key;
   bool has_current_user_key = false;
   SequenceNumber last_sequence_for_key = kMaxSequenceNumber;
-  uint64_t i = 0;
   for (; input->Valid() && !shutting_down_.Acquire_Load(); ) {
     Slice key = input->key();
     // Handle key/value, add to state, etc.
@@ -1540,7 +1539,6 @@ Status DBImpl::SequenceWriteBegin(Writer* w, WriteBatch* updates) {
   MutexLock l(&mutex_);
   straight_reads_ = 0;
   bool force = updates == NULL;
-  bool allow_delay = !force;
   bool enqueue_mem = false;
   w->old_log.reset();
   w->old_logfile.reset();
