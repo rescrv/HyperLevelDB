@@ -65,20 +65,6 @@ static int64_t TotalFileSize(const std::vector<FileMetaData*>& files) {
   return sum;
 }
 
-namespace {
-std::string IntSetToString(const std::set<uint64_t>& s) {
-  std::string result = "{";
-  for (std::set<uint64_t>::const_iterator it = s.begin();
-       it != s.end();
-       ++it) {
-    result += (result.size() > 1) ? "," : "";
-    result += NumberToString(*it);
-  }
-  result += "}";
-  return result;
-}
-}  // namespace
-
 Version::~Version() {
   assert(refs_ == 0);
 
@@ -553,7 +539,6 @@ int Version::PickLevelForMemTableOutput(
         break;
       }
       GetOverlappingInputs(level + 2, &start, &limit, &overlaps);
-      const int64_t sum = TotalFileSize(overlaps);
       level++;
     }
   }
@@ -1496,7 +1481,6 @@ Compaction* VersionSet::PickCompaction(Version* v, int level) {
       assert(level >= 0);
       assert(level+1 < config::kNumLevels);
       // Pick the file that overlaps with the fewest files in the next level
-      size_t largest = boundaries.size();
       size_t smallest = boundaries.size();
       for (size_t i = 0; i < boundaries.size(); ++i) {
         if (smallest == boundaries.size() ||
