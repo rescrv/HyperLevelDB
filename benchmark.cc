@@ -49,15 +49,13 @@
 #include <armnod.h>
 
 // numbers
-#include <numbers.h>
+#include <ygor.h>
 
 static void
-backup_thread(leveldb::DB*,
-              numbers::throughput_latency_logger* tll);
+backup_thread(leveldb::DB*, ygor_data_logger* dl);
 
 static void
-worker_thread(leveldb::DB*,
-              numbers::throughput_latency_logger* tll,
+worker_thread(leveldb::DB*, ygor_data_logger* dl,
               const armnod::argparser& k,
               const armnod::argparser& v);
 
@@ -117,9 +115,9 @@ main(int argc, const char* argv[])
         return EXIT_FAILURE;
     }
 
-    numbers::throughput_latency_logger tll;
+    ygor_data_logger* dl = ygor_data_logger_create(_output, 100000, 100);
 
-    if (!tll.open(_output))
+    if (!dl)
     {
         std::cerr << "could not open log: " << strerror(errno) << std::endl;
         return EXIT_FAILURE;
@@ -130,14 +128,14 @@ main(int argc, const char* argv[])
 
     if (_backup > 0)
     {
-        thread_ptr t(new po6::threads::thread(std::tr1::bind(backup_thread, db, &tll)));
+        thread_ptr t(new po6::threads::thread(std::tr1::bind(backup_thread, db, dl)));
         threads.push_back(t);
         t->start();
     }
 
     for (size_t i = 0; i < _threads; ++i)
     {
-        thread_ptr t(new po6::threads::thread(std::tr1::bind(worker_thread, db, &tll, key_parser, value_parser)));
+        thread_ptr t(new po6::threads::thread(std::tr1::bind(worker_thread, db, dl, key_parser, value_parser)));
         threads.push_back(t);
         t->start();
     }
@@ -151,7 +149,7 @@ main(int argc, const char* argv[])
     if (db->GetProperty("leveldb.stats", &tmp)) std::cout << tmp << std::endl;
     delete db;
 
-    if (!tll.close())
+    if (ygor_data_logger_flush_and_destroy(dl) < 0)
     {
         std::cerr << "could not close log: " << strerror(errno) << std::endl;
         return EXIT_FAILURE;
@@ -183,14 +181,11 @@ get_random()
 #define BILLION (1000ULL * 1000ULL * 1000ULL)
 
 void
-backup_thread(leveldb::DB* db,
-              numbers::throughput_latency_logger* tll)
+backup_thread(leveldb::DB* db, ygor_data_logger* dl)
 {
     uint64_t target = e::time() / BILLION;
     target += _backup;
     uint64_t idx = 0;
-    numbers::throughput_latency_logger::thread_state ts;
-    tll->initialize_thread(&ts);
 
     while (__sync_fetch_and_add(&_done, 0) < _number)
     {
@@ -211,10 +206,13 @@ backup_thread(leveldb::DB* db,
             buf[31] = '\0';
             leveldb::Slice name(buf);
             leveldb::Status st;
+            ygor_data_record dr;
+            dr.flags = 4;
 
-            tll->start(&ts, 4);
+            ygor_data_logger_start(dl, &dr);
             st = db->LiveBackup(name);
-            tll->finish(&ts);
+            ygor_data_logger_finish(dl, &dr);
+            ygor_data_logger_record(dl, &dr);
             assert(st.ok());
             ++idx;
         }
@@ -223,7 +221,7 @@ backup_thread(leveldb::DB* db,
 
 void
 worker_thread(leveldb::DB* db,
-              numbers::throughput_latency_logger* tll,
+              ygor_data_logger* dl,
               const armnod::argparser& _k,
               const armnod::argparser& _v)
 {
@@ -231,8 +229,6 @@ worker_thread(leveldb::DB* db,
     armnod::generator val(armnod::argparser(_v).config());
     key.seed(get_random());
     val.seed(get_random());
-    numbers::throughput_latency_logger::thread_state ts;
-    tll->initialize_thread(&ts);
 
     while (__sync_fetch_and_add(&_done, 1) < _number)
     {
@@ -242,19 +238,22 @@ worker_thread(leveldb::DB* db,
         // issue a "get"
         std::string tmp;
         leveldb::ReadOptions ropts;
-        tll->start(&ts, 1);
+        ygor_data_record dr;
+        dr.flags = 1;
+        ygor_data_logger_start(dl, &dr);
         leveldb::Status rst = db->Get(ropts, leveldb::Slice(k.data(), k.size()), &tmp);
-        tll->finish(&ts);
+        ygor_data_logger_finish(dl, &dr);
+        ygor_data_logger_record(dl, &dr);
         assert(rst.ok() || rst.IsNotFound());
 
         // issue a "put"
         leveldb::WriteOptions wopts;
         wopts.sync = false;
-        tll->start(&ts, 2);
+        dr.flags = 2;
+        ygor_data_logger_start(dl, &dr);
         leveldb::Status wst = db->Put(wopts, leveldb::Slice(k.data(), k.size()), leveldb::Slice(v.data(), v.size()));
-        tll->finish(&ts);
+        ygor_data_logger_finish(dl, &dr);
+        ygor_data_logger_record(dl, &dr);
         assert(wst.ok());
     }
-
-    tll->terminate_thread(&ts);
 }
