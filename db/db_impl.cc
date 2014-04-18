@@ -141,8 +141,7 @@ DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
       straight_reads_(0),
       backup_cv_(&mutex_),
       backup_in_progress_(),
-      backup_deferred_delete_(),
-      consecutive_compaction_errors_(0) {
+      backup_deferred_delete_() {
   mutex_.Lock();
   mem_->Ref();
   has_imm_.Release_Store(NULL);
@@ -246,6 +245,12 @@ void DBImpl::DeleteObsoleteFiles() {
 
   // If you ever release mutex_ in this function, you'll need to do more work in
   // LiveBackup
+
+  if (!bg_error_.ok()) {
+    // After a background error, we don't know whether a new version may
+    // or may not have been committed, so we cannot safely garbage collect.
+    return;
+  }
 
   // Make a set of all of the live files
   std::set<uint64_t> live = pending_outputs_;
@@ -571,6 +576,9 @@ void DBImpl::CompactMemTableThread() {
       bg_fg_cv_.SignalAll();
       bg_compaction_cv_.Signal();
       DeleteObsoleteFiles();
+    } else {
+      RecordBackgroundError(s);
+      continue;
     }
 
     if (!shutting_down_.Acquire_Load() && !s.ok()) {
@@ -637,16 +645,18 @@ void DBImpl::TEST_CompactRange(int level, const Slice* begin,const Slice* end) {
   }
 
   MutexLock l(&mutex_);
-  while (!manual.done) {
-    while (manual_compaction_ != NULL) {
+  while (!manual.done && !shutting_down_.Acquire_Load() && bg_error_.ok()) {
+    if (manual_compaction_ == NULL) {  // Idle
+      manual_compaction_ = &manual;
+      bg_compaction_cv_.Signal();
+      bg_memtable_cv_.Signal();
+    } else {  // Running either my compaction or another compaction.
       bg_fg_cv_.Wait();
     }
-    manual_compaction_ = &manual;
-    bg_compaction_cv_.Signal();
-    bg_memtable_cv_.Signal();
-    while (manual_compaction_ == &manual) {
-      bg_fg_cv_.Wait();
-    }
+  }
+  if (manual_compaction_ == &manual) {
+    // Cancel my manual compaction since we aborted early for some reason.
+    manual_compaction_ = NULL;
   }
 }
 
@@ -688,7 +698,6 @@ void DBImpl::CompactLevelThread() {
 
     if (s.ok()) {
       // Success
-      consecutive_compaction_errors_ = 0;
     } else if (shutting_down_.Acquire_Load()) {
       // Error most likely due to shutdown; do not wait
     } else {
@@ -699,11 +708,7 @@ void DBImpl::CompactLevelThread() {
       Log(options_.info_log, "Waiting after background compaction error: %s",
           s.ToString().c_str());
       mutex_.Unlock();
-      ++consecutive_compaction_errors_;
       int seconds_to_sleep = 1;
-      for (int i = 0; i < 3 && i < consecutive_compaction_errors_ - 1; ++i) {
-        seconds_to_sleep *= 2;
-      }
       env_->SleepForMicroseconds(seconds_to_sleep * 1000000);
       mutex_.Lock();
     }
@@ -711,6 +716,14 @@ void DBImpl::CompactLevelThread() {
   Log(options_.info_log, "cleaning up CompactLevelThread");
   num_bg_threads_ -= 1;
   bg_fg_cv_.SignalAll();
+}
+
+void DBImpl::RecordBackgroundError(const Status& s) {
+  mutex_.AssertHeld();
+  if (bg_error_.ok()) {
+    bg_error_ = s;
+    bg_fg_cv_.SignalAll();
+  }
 }
 
 Status DBImpl::BackgroundCompaction() {
@@ -757,6 +770,9 @@ Status DBImpl::BackgroundCompaction() {
                          f->smallest, f->largest);
     }
     status = versions_->LogAndApply(c->edit(), &mutex_, &bg_log_cv_, &bg_log_occupied_);
+    if (!status.ok()) {
+      RecordBackgroundError(status);
+    }
     VersionSet::LevelSummaryStorage tmp;
     for (size_t i = 0; i < c->num_input_files(0); ++i) {
       FileMetaData* f = c->input(0, i);
@@ -770,6 +786,9 @@ Status DBImpl::BackgroundCompaction() {
   } else {
     CompactionState* compact = new CompactionState(c);
     status = DoCompactionWork(compact);
+    if (!status.ok()) {
+      RecordBackgroundError(status);
+    }
     CleanupCompaction(compact);
     c->ReleaseInputs();
     DeleteObsoleteFiles();
@@ -788,9 +807,6 @@ Status DBImpl::BackgroundCompaction() {
   } else {
     Log(options_.info_log,
         "Compaction error: %s", status.ToString().c_str());
-    if (options_.paranoid_checks && bg_error_.ok()) {
-      bg_error_ = status;
-    }
   }
 
   if (is_manual) {
@@ -1184,6 +1200,9 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   if (status.ok()) {
     status = InstallCompactionResults(compact);
   }
+  if (!status.ok()) {
+    RecordBackgroundError(status);
+  }
   VersionSet::LevelSummaryStorage tmp;
   Log(options_.info_log,
       "compacted to: %s", versions_->LevelSummary(&tmp));
@@ -1521,13 +1540,19 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
     // because both the log and the memtable are safe for concurrent access.
     // The synchronization with readers occurs with SequenceWriteEnd.
     s = w.log->AddRecord(WriteBatchInternal::Contents(updates));
+
+    if (s.ok() && options.sync) {
+      s = w.logfile->Sync();
+    }
     if (s.ok()) {
       s = WriteBatchInternal::InsertInto(updates, w.mem);
     }
   }
 
-  if (s.ok() && options.sync) {
-    s = w.logfile->Sync();
+  if (!s.ok()) {
+    mutex_.Lock();
+    RecordBackgroundError(s);
+    mutex_.Unlock();
   }
 
   SequenceWriteEnd(&w);

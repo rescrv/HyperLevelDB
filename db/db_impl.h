@@ -139,6 +139,8 @@ class DBImpl : public DB {
   void CompactOptimisticThread();
   Status OptimisticCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
+  void RecordBackgroundError(const Status& s);
+
   void CleanupCompaction(CompactionState* compact)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   Status DoCompactionWork(CompactionState* compact)
@@ -228,7 +230,6 @@ class DBImpl : public DB {
 
   // Have we encountered a background error in paranoid mode?
   Status bg_error_;
-  int consecutive_compaction_errors_;
 
   // Per level compaction stats.  stats_[level] stores the stats for
   // compactions that produced data for the specified "level".
