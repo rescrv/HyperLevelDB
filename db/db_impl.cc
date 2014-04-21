@@ -124,8 +124,8 @@ DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
       logfile_number_(0),
       log_(),
       seed_(0),
-      writers_lower_(0),
       writers_upper_(0),
+      writers_tail_(NULL),
       allow_background_activity_(false),
       num_bg_threads_(0),
       bg_fg_cv_(&mutex_),
@@ -1502,6 +1502,7 @@ struct DBImpl::Writer {
   port::Mutex mtx;
   port::CondVar cv;
   bool linked;
+  bool mayend;
   Writer* next;
   uint64_t start_sequence;
   uint64_t end_sequence;
@@ -1515,6 +1516,7 @@ struct DBImpl::Writer {
     : mtx(),
       cv(&mtx),
       linked(false),
+      mayend(false),
       next(NULL),
       start_sequence(0),
       end_sequence(0),
@@ -1612,6 +1614,12 @@ Status DBImpl::SequenceWriteBegin(Writer* w, WriteBatch* updates) {
   }
 
   if (s.ok()) {
+    if (writers_tail_) {
+      *writers_tail_ = w;
+    } else {
+      w->mayend = true;
+    }
+    writers_tail_ = &w->next;
     w->linked = true;
     w->next = NULL;
     uint64_t diff = updates ? WriteBatchInternal::Count(updates) : 0;
@@ -1640,17 +1648,30 @@ void DBImpl::SequenceWriteEnd(Writer* w) {
   }
 
   // wait until we are next
-  while (__sync_fetch_and_add(&writers_lower_, 0) < w->start_sequence)
-    ;
+  {
+    MutexLock l(&w->mtx);
+    while (!w->mayend) {
+      w->cv.Wait();
+    }
+  }
 
   // swizzle state to make ours visible
+  Writer* next = NULL;
   {
     MutexLock l(&mutex_);
     versions_->SetLastSequence(w->end_sequence);
+    if (writers_tail_ == &w->next) {
+      writers_tail_ = NULL;
+    }
+    next = w->next;
   }
 
   // signal the next writer
-  __sync_fetch_and_add(&writers_lower_, 1 + w->end_sequence - w->start_sequence);
+  if (next) {
+    MutexLock l(&next->mtx);
+    next->mayend = true;
+    next->cv.Signal();
+  }
 
   // must do in order: log, logfile
   if (w->old_log) {
@@ -1755,10 +1776,28 @@ Status DBImpl::LiveBackup(const Slice& _name) {
 
   name = Slice(name.data(), name_sz);
   std::set<uint64_t> live;
-  uint64_t ticket = __sync_add_and_fetch(&writers_upper_, 1);
+  uint64_t ticket;
+  Writer w;
 
-  while (__sync_fetch_and_add(&writers_lower_, 0) < ticket)
-    ;
+  {
+    MutexLock l(&mutex_);
+    ticket = __sync_add_and_fetch(&writers_upper_, 1);
+    if (writers_tail_) {
+      *writers_tail_ = &w;
+    } else {
+      w.mayend = true;
+    }
+    writers_tail_ = &w.next;
+    w.linked = true;
+    w.next = NULL;
+  }
+
+  {
+    MutexLock l(&w.mtx);
+    while (!w.mayend) {
+      w.cv.Wait();
+    }
+  }
 
   {
     MutexLock l(&mutex_);
@@ -1777,7 +1816,16 @@ Status DBImpl::LiveBackup(const Slice& _name) {
     // release mutex_, you'll need to add some sort of synchronization in place
     // of this text block.
     versions_->AddLiveFiles(&live);
-    __sync_fetch_and_add(&writers_lower_, 1);
+    if (writers_tail_ == &w.next) {
+      writers_tail_ = NULL;
+    }
+  }
+
+  // signal the next writer
+  if (w.next) {
+    MutexLock l(&w.next->mtx);
+    w.next->mayend = true;
+    w.next->cv.Signal();
   }
 
   Status s;
@@ -1902,7 +1950,6 @@ Status DB::Open(const Options& options, const std::string& dbname,
     delete impl;
   }
   impl->writers_upper_ = impl->versions_->LastSequence();
-  impl->writers_lower_ = impl->writers_upper_ + 1;
   return s;
 }
 
