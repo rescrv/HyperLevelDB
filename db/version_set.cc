@@ -186,8 +186,8 @@ class Version::LevelFileNumIterator : public Iterator {
     Bump();
   }
   virtual void SeekToLast() {
-    assert(number_ == 0);
     index_ = flist_->empty() ? 0 : flist_->size() - 1;
+    Bump();
   }
   virtual void Next() {
     assert(Valid());

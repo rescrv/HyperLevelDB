@@ -23,6 +23,14 @@ class ReplayIterator {
   // REQUIRES: Valid()
   virtual void Next() = 0;
 
+  // Position at the first key in the source that at or past target for this
+  // pass.  Note that this is unlike the Seek call, as the ReplayIterator is
+  // unsorted.
+  // The iterator is Valid() after this call iff the source contains
+  // an entry that comes at or past target.
+  virtual void SkipTo(const Slice& target) = 0;
+  virtual void SkipToLast() = 0;
+
   // Return true if the current entry points to a key-value pair.  If this
   // returns false, it means the current entry is a deleted entry.
   virtual bool HasValue() = 0;

@@ -66,6 +66,22 @@ void ReplayIteratorImpl::Next() {
   rs_.iter_->Next();
 }
 
+void ReplayIteratorImpl::SkipTo(const Slice& target) {
+  std::string internal_key;
+  AppendInternalKey(&internal_key, ParsedInternalKey(target, kMaxSequenceNumber, kValueTypeForSeek));
+  rs_.iter_->Seek(internal_key);
+}
+
+void ReplayIteratorImpl::SkipToLast() {
+  rs_.iter_->SeekToLast();
+  while (rs_.iter_->Valid()) {
+    rs_.iter_->Next();
+  }
+}
+
+void SkipTo(const Slice& target) {
+}
+
 bool ReplayIteratorImpl::HasValue() {
   ParsedInternalKey ikey;
   return ParseKey(&ikey) && ikey.type == kTypeValue;

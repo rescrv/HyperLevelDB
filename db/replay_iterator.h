@@ -31,6 +31,8 @@ class ReplayIteratorImpl : public ReplayIterator {
       Iterator* iter, MemTable* m, SequenceNumber s);
   virtual bool Valid();
   virtual void Next();
+  virtual void SkipTo(const Slice& target);
+  virtual void SkipToLast();
   virtual bool HasValue();
   virtual Slice key() const;
   virtual Slice value() const;

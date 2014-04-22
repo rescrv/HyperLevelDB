@@ -1439,6 +1439,7 @@ Status DBImpl::GetReplayIterator(const std::string& timestamp,
   }
 
   ReadOptions options;
+  options.fill_cache = false;
   SequenceNumber latest_snapshot;
   uint32_t seed;
   MutexLock l(&mutex_);
