@@ -26,7 +26,7 @@ class Status {
 
   // Copy the specified status.
   Status(const Status& s);
-  void operator=(const Status& s);
+  Status& operator=(const Status& s);
 
   // Return a success status.
   static Status OK() { return Status(); }
@@ -89,16 +89,17 @@ class Status {
   static const char* CopyState(const char* s);
 };
 
-inline Status::Status(const Status& s) {
+inline Status::Status(const Status& s) : state_(NULL) {
   state_ = (s.state_ == NULL) ? NULL : CopyState(s.state_);
 }
-inline void Status::operator=(const Status& s) {
+inline Status& Status::operator=(const Status& s) {
   // The following condition catches both aliasing (when this == &s),
   // and the common case where both s and *this are ok.
   if (state_ != s.state_) {
     delete[] state_;
     state_ = (s.state_ == NULL) ? NULL : CopyState(s.state_);
   }
+  return *this;
 }
 
 }  // namespace leveldb
