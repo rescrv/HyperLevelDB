@@ -26,8 +26,9 @@
 ## POSSIBILITY OF SUCH DAMAGE.
 
 ACLOCAL_AMFLAGS = -I m4 ${ACLOCAL_FLAGS}
-AM_CFLAGS = -DLEVELDB_PLATFORM_POSIX $(SNAPPY_FLAGS) ${EXTRA_CFLAGS}
-AM_CXXFLAGS = -DLEVELDB_PLATFORM_POSIX $(SNAPPY_FLAGS) ${EXTRA_CFLAGS}
+AM_CPPFLAGS = -I${abs_top_srcdir}/include
+AM_CFLAGS = -DLEVELDB_PLATFORM_POSIX $(SNAPPY_FLAGS) ${EXTRA_CFLAGS} $(WANAL_CFLAGS)
+AM_CXXFLAGS = -DLEVELDB_PLATFORM_POSIX $(SNAPPY_FLAGS) ${EXTRA_CFLAGS} $(WANAL_CXXFLAGS)
 AM_MAKEFLAGS = --no-print-directory
 
 pkgconfigdir = $(libdir)/pkgconfig
@@ -49,21 +50,21 @@ EXTRA_DIST += port/README
 EXTRA_DIST += README
 EXTRA_DIST += TODO
 
-nobase_include_HEADERS =
-nobase_include_HEADERS += hyperleveldb/cache.h
-nobase_include_HEADERS += hyperleveldb/c.h
-nobase_include_HEADERS += hyperleveldb/comparator.h
-nobase_include_HEADERS += hyperleveldb/db.h
-nobase_include_HEADERS += hyperleveldb/env.h
-nobase_include_HEADERS += hyperleveldb/filter_policy.h
-nobase_include_HEADERS += hyperleveldb/iterator.h
-nobase_include_HEADERS += hyperleveldb/options.h
-nobase_include_HEADERS += hyperleveldb/slice.h
-nobase_include_HEADERS += hyperleveldb/replay_iterator.h
-nobase_include_HEADERS += hyperleveldb/status.h
-nobase_include_HEADERS += hyperleveldb/table_builder.h
-nobase_include_HEADERS += hyperleveldb/table.h
-nobase_include_HEADERS += hyperleveldb/write_batch.h
+pkginclude_HEADERS =
+pkginclude_HEADERS += include/hyperleveldb/cache.h
+pkginclude_HEADERS += include/hyperleveldb/c.h
+pkginclude_HEADERS += include/hyperleveldb/comparator.h
+pkginclude_HEADERS += include/hyperleveldb/db.h
+pkginclude_HEADERS += include/hyperleveldb/env.h
+pkginclude_HEADERS += include/hyperleveldb/filter_policy.h
+pkginclude_HEADERS += include/hyperleveldb/iterator.h
+pkginclude_HEADERS += include/hyperleveldb/options.h
+pkginclude_HEADERS += include/hyperleveldb/slice.h
+pkginclude_HEADERS += include/hyperleveldb/replay_iterator.h
+pkginclude_HEADERS += include/hyperleveldb/status.h
+pkginclude_HEADERS += include/hyperleveldb/table_builder.h
+pkginclude_HEADERS += include/hyperleveldb/table.h
+pkginclude_HEADERS += include/hyperleveldb/write_batch.h
 noinst_HEADERS =
 noinst_HEADERS += db/builder.h
 noinst_HEADERS += db/dbformat.h
