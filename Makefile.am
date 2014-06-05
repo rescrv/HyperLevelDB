@@ -192,7 +192,7 @@ check_PROGRAMS += issue200_test
 TESTS = $(check_PROGRAMS)
 
 benchmark_SOURCES = benchmark.cc
-benchmark_LDADD = libhyperleveldb.la -lpthread -le -lpopt -larmnod -lygor
+benchmark_LDADD = libhyperleveldb.la -lpthread -le -lpopt -lygor
 benchmark_LDFLAGS = -no-install
 
 db_bench_SOURCES = db/db_bench.cc $(TESTUTIL)
