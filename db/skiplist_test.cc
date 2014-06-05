@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+#define __STDC_LIMIT_MACROS
+
 #include "db/skiplist.h"
 #include <set>
 #include "hyperleveldb/env.h"
@@ -26,15 +28,22 @@ struct Comparator {
   }
 };
 
+struct Extractor {
+  uint64_t operator()(const Key& k) const {
+    return k;
+  }
+};
+
 class SkipTest { };
 
 TEST(SkipTest, Empty) {
   Arena arena;
   Comparator cmp;
-  SkipList<Key, Comparator> list(cmp, &arena);
+  Extractor ext;
+  SkipList<Key, Comparator, Extractor> list(cmp, ext, &arena);
   ASSERT_TRUE(!list.Contains(10));
 
-  SkipList<Key, Comparator>::Iterator iter(&list);
+  SkipList<Key, Comparator, Extractor>::Iterator iter(&list);
   ASSERT_TRUE(!iter.Valid());
   iter.SeekToFirst();
   ASSERT_TRUE(!iter.Valid());
@@ -51,7 +60,8 @@ TEST(SkipTest, InsertAndLookup) {
   std::set<Key> keys;
   Arena arena;
   Comparator cmp;
-  SkipList<Key, Comparator> list(cmp, &arena);
+  Extractor ext;
+  SkipList<Key, Comparator, Extractor> list(cmp, ext, &arena);
   for (int i = 0; i < N; i++) {
     Key key = rnd.Next() % R;
     if (keys.insert(key).second) {
@@ -69,7 +79,7 @@ TEST(SkipTest, InsertAndLookup) {
 
   // Simple iterator tests
   {
-    SkipList<Key, Comparator>::Iterator iter(&list);
+    SkipList<Key, Comparator, Extractor>::Iterator iter(&list);
     ASSERT_TRUE(!iter.Valid());
 
     iter.Seek(0);
@@ -87,7 +97,7 @@ TEST(SkipTest, InsertAndLookup) {
 
   // Forward iteration test
   for (int i = 0; i < R; i++) {
-    SkipList<Key, Comparator>::Iterator iter(&list);
+    SkipList<Key, Comparator, Extractor>::Iterator iter(&list);
     iter.Seek(i);
 
     // Compare against model iterator
@@ -107,7 +117,7 @@ TEST(SkipTest, InsertAndLookup) {
 
   // Backward iteration test
   {
-    SkipList<Key, Comparator>::Iterator iter(&list);
+    SkipList<Key, Comparator, Extractor>::Iterator iter(&list);
     iter.SeekToLast();
 
     // Compare against model iterator
@@ -208,10 +218,10 @@ class ConcurrentTest {
 
   // SkipList is not protected by mu_.  We just use a single writer
   // thread to modify it.
-  SkipList<Key, Comparator> list_;
+  SkipList<Key, Comparator, Extractor> list_;
 
  public:
-  ConcurrentTest() : list_(Comparator(), &arena_) { }
+  ConcurrentTest() : list_(Comparator(), Extractor(), &arena_) { }
 
   // REQUIRES: External synchronization
   void WriteStep(Random* rnd) {
@@ -230,7 +240,7 @@ class ConcurrentTest {
     }
 
     Key pos = RandomTarget(rnd);
-    SkipList<Key, Comparator>::Iterator iter(&list_);
+    SkipList<Key, Comparator, Extractor>::Iterator iter(&list_);
     iter.Seek(pos);
     while (true) {
       Key current;

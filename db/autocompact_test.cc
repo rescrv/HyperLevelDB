@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+#define __STDC_LIMIT_MACROS
+
 #include "hyperleveldb/db.h"
 #include "db/db_impl.h"
 #include "hyperleveldb/cache.h"
@@ -107,9 +109,6 @@ TEST(AutoCompactTest, ReadAll) {
   DoReads(kCount);
 }
 
-// HyperLevelDB's ratio-driven compactions always compact everything here.  The
-// reads trigger the compaction, but then the system decides it is more
-// effiicient to just collect everything, emptying the db completely.
 #if 0
 TEST(AutoCompactTest, ReadHalf) {
   DoReads(kCount/2);

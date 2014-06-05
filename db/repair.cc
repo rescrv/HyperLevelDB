@@ -24,6 +24,8 @@
 //   Store per-table metadata (smallest, largest, largest-seq#, ...)
 //   in the table's meta section to speed up ScanTable.
 
+#define __STDC_LIMIT_MACROS
+
 #include "db/builder.h"
 #include "db/db_impl.h"
 #include "db/dbformat.h"
@@ -258,11 +260,11 @@ class Repairer {
   void ScanTable(uint64_t number) {
     TableInfo t;
     t.meta.number = number;
-    std::string fname = SSTTableFileName(dbname_, number);
+    std::string fname = TableFileName(dbname_, number);
     Status status = env_->GetFileSize(fname, &t.meta.file_size);
     if (!status.ok()) {
       // Try alternate file name.
-      fname = TableFileName(dbname_, number);
+      fname = LDBTableFileName(dbname_, number);
       Status s2 = env_->GetFileSize(fname, &t.meta.file_size);
       if (s2.ok()) {
         status = Status::OK();
@@ -270,7 +272,7 @@ class Repairer {
     }
     if (!status.ok()) {
       ArchiveFile(TableFileName(dbname_, number));
-      ArchiveFile(SSTTableFileName(dbname_, number));
+      ArchiveFile(LDBTableFileName(dbname_, number));
       Log(options_.info_log, "Table #%llu: dropped: %s",
           (unsigned long long) t.meta.number,
           status.ToString().c_str());
@@ -374,8 +376,8 @@ class Repairer {
 
   Status WriteDescriptor() {
     std::string tmp = TempFileName(dbname_, 1);
-    WritableFile* file;
-    Status status = env_->NewWritableFile(tmp, &file);
+    ConcurrentWritableFile* file;
+    Status status = env_->NewConcurrentWritableFile(tmp, &file);
     if (!status.ok()) {
       return status;
     }

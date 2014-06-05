@@ -13,9 +13,8 @@
 namespace leveldb {
 namespace log {
 
-Writer::Writer(WritableFile* dest)
+Writer::Writer(ConcurrentWritableFile* dest)
     : dest_(dest),
-      offset_mtx_(),
       offset_(0) {
   for (int i = 0; i <= kMaxRecordType; i++) {
     char t = static_cast<char>(i);
@@ -29,33 +28,27 @@ Writer::~Writer() {
 Status Writer::AddRecord(const Slice& slice) {
   // computation of block_offset requires a pow2
   assert(kBlockSize == 32768);
-  uint64_t start_offset;
-  uint64_t end_offset;
+  uint64_t start_offset = 0;
+  uint64_t end_offset = 0;
 
-  {
-    MutexLock l(&offset_mtx_);
-    start_offset = offset_;
-    end_offset = offset_;
-    // compute the new offset_
-    uint64_t left = slice.size();
-    do {
-      uint64_t block_offset = end_offset & (kBlockSize - 1);
-      const uint64_t leftover = kBlockSize - block_offset;
-      assert(leftover > 0);
-      if (leftover < kHeaderSize) {
-        end_offset += leftover;
-        block_offset = 0;
-      }
-      // Invariant: we never leave < kHeaderSize bytes in a block.
-      assert(kBlockSize - block_offset - kHeaderSize >= 0);
-
-      const uint64_t avail = kBlockSize - block_offset - kHeaderSize;
-      const uint64_t fragment_length = (left < avail) ? left : avail;
-
-      end_offset += kHeaderSize + fragment_length;
-      left -= fragment_length;
-    } while (left > 0);
-    offset_ = end_offset;
+  while (true) {
+    start_offset = __sync_add_and_fetch(&offset_, 0);
+    uint64_t roundup_start = start_offset;
+    if (kBlockSize - (start_offset & (kBlockSize - 1)) < kHeaderSize) {
+      roundup_start += kHeaderSize;
+      roundup_start = roundup_start & ~(kBlockSize - 1);
+    }
+    const uint64_t left = kBlockSize - (roundup_start & (kBlockSize - 1));
+    assert(left >= kHeaderSize);
+    if (kHeaderSize + slice.size() <= left) {
+      end_offset = roundup_start + kHeaderSize + slice.size();
+    } else {
+      end_offset = ComputeRecordSize(roundup_start + left,
+                                     slice.size() + kHeaderSize - left);
+    }
+    if (__sync_bool_compare_and_swap(&offset_, start_offset, end_offset)) {
+      break;
+    }
   }
 
   const char* ptr = slice.data();
@@ -104,6 +97,14 @@ Status Writer::AddRecord(const Slice& slice) {
     begin = false;
   } while (s.ok() && left > 0);
   return s;
+}
+
+uint64_t Writer::ComputeRecordSize(uint64_t start, uint64_t remain) {
+  assert((start & ~(kBlockSize- 1)) == start);
+  const uint64_t per_block = kBlockSize - kHeaderSize;
+  const uint64_t whole_blocks = remain / per_block;
+  const uint64_t leftover = remain % per_block;
+  return start + whole_blocks * kBlockSize + kHeaderSize + leftover;
 }
 
 Status Writer::EmitPhysicalRecordAt(RecordType t, const char* ptr, uint64_t offset, size_t n) {

@@ -7,27 +7,27 @@
 #ifndef STORAGE_LEVELDB_PORT_PORT_POSIX_H_
 #define STORAGE_LEVELDB_PORT_PORT_POSIX_H_
 
-#if HAVE_CONFIG_H
+#ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
 
-#if HAVE_ENDIAN_H
+#ifdef HAVE_ENDIAN_H
 #include <endian.h>
 #endif
 
-#if HAVE_MACHINE_ENDIAN_H
+#ifdef HAVE_MACHINE_ENDIAN_H
 #include <machine/endian.h>
 #endif
 
-#if HAVE_SYS_ENDIAN_H
+#ifdef HAVE_SYS_ENDIAN_H
 #include <sys/endian.h>
 #endif
 
-#if HAVE_SYS_ISA_DEFS_H
+#ifdef HAVE_SYS_ISA_DEFS_H
 #include <sys/isa_defs.h>
 #endif
 
-#if HAVE_SYS_ENDIAN_H
+#ifdef HAVE_SYS_ENDIAN_H
 #include <sys/types.h>
 #endif
 
@@ -56,7 +56,7 @@
 #define PLATFORM_IS_LITTLE_ENDIAN (__BYTE_ORDER == __LITTLE_ENDIAN)
 #endif
 
-#if HAVE_FFLUSH_UNLOCKED
+#ifdef HAVE_FFLUSH_UNLOCKED
 // do nothing
 #elif HAVE_FFLUSH
 #define fflush_unlocked fflush
@@ -64,7 +64,7 @@
 #error "no fflush found"
 #endif
 
-#if HAVE_FREAD_UNLOCKED
+#ifdef HAVE_FREAD_UNLOCKED
 // do nothing
 #elif HAVE_FREAD
 #define fread_unlocked fread
@@ -72,7 +72,7 @@
 #error "no fread found"
 #endif
 
-#if HAVE_FWRITE_UNLOCKED
+#ifdef HAVE_FWRITE_UNLOCKED
 // do nothing
 #elif HAVE_FWRITE
 #define fwrite_unlocked fwrite
@@ -80,7 +80,7 @@
 #error "no fwrite found"
 #endif
 
-#if HAVE_DECL_FDATASYNC
+#ifdef HAVE_DECL_FDATASYNC
 // do nothing
 #elif HAVE_FSYNC
 #define fdatasync fsync
@@ -124,6 +124,10 @@ class CondVar {
  private:
   pthread_cond_t cv_;
   Mutex* mu_;
+
+  // No copying
+  CondVar(const CondVar&);
+  void operator=(const CondVar&);
 };
 
 typedef pthread_once_t OnceType;
@@ -138,6 +142,10 @@ inline bool Snappy_Compress(const char* input, size_t length,
   snappy::RawCompress(input, length, &(*output)[0], &outlen);
   output->resize(outlen);
   return true;
+#else
+  (void)input;
+  (void)length;
+  (void)output;
 #endif
 
   return false;
@@ -148,6 +156,9 @@ inline bool Snappy_GetUncompressedLength(const char* input, size_t length,
 #ifdef SNAPPY
   return snappy::GetUncompressedLength(input, length, result);
 #else
+  (void)input;
+  (void)length;
+  (void)result;
   return false;
 #endif
 }
@@ -157,11 +168,16 @@ inline bool Snappy_Uncompress(const char* input, size_t length,
 #ifdef SNAPPY
   return snappy::RawUncompress(input, length, output);
 #else
+  (void)input;
+  (void)length;
+  (void)output;
   return false;
 #endif
 }
 
 inline bool GetHeapProfile(void (*func)(void*, const char*, int), void* arg) {
+  (void)func;
+  (void)arg;
   return false;
 }
 

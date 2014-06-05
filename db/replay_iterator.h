@@ -66,6 +66,9 @@ class ReplayIteratorImpl : public ReplayIterator {
 
   ReplayState rs_;
   std::list<ReplayState> mems_;
+
+  ReplayIteratorImpl(const ReplayIteratorImpl&);
+  ReplayIteratorImpl& operator = (const ReplayIteratorImpl&);
 };
 
 }  // namespace leveldb

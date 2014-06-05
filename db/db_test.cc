@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+#define __STDC_LIMIT_MACROS
+
 #include "hyperleveldb/db.h"
 #include "hyperleveldb/filter_policy.h"
 #include "db/db_impl.h"
@@ -89,13 +91,20 @@ class SpecialEnv : public EnvWrapper {
   }
 
   Status NewWritableFile(const std::string& f, WritableFile** r) {
-    class DataFile : public WritableFile {
+    ConcurrentWritableFile* _r;
+    Status s = this->NewConcurrentWritableFile(f, &_r);
+    *r = _r;
+    return s;
+  }
+
+  Status NewConcurrentWritableFile(const std::string& f, ConcurrentWritableFile** r) {
+    class DataFile : public ConcurrentWritableFile {
      private:
       SpecialEnv* env_;
-      WritableFile* base_;
+      ConcurrentWritableFile* base_;
 
      public:
-      DataFile(SpecialEnv* env, WritableFile* base)
+      DataFile(SpecialEnv* env, ConcurrentWritableFile* base)
           : env_(env),
             base_(base) {
       }
@@ -117,6 +126,7 @@ class SpecialEnv : public EnvWrapper {
         }
       }
       Status Close() { return base_->Close(); }
+      Status Flush() { return base_->Flush(); }
       Status Sync() {
         if (env_->data_sync_error_.Acquire_Load() != NULL) {
           return Status::IOError("simulated data sync error");
@@ -127,12 +137,12 @@ class SpecialEnv : public EnvWrapper {
         return base_->Sync();
       }
     };
-    class ManifestFile : public WritableFile {
+    class ManifestFile : public ConcurrentWritableFile {
      private:
       SpecialEnv* env_;
-      WritableFile* base_;
+      ConcurrentWritableFile* base_;
      public:
-      ManifestFile(SpecialEnv* env, WritableFile* b) : env_(env), base_(b) { }
+      ManifestFile(SpecialEnv* env, ConcurrentWritableFile* b) : env_(env), base_(b) { }
       ~ManifestFile() { delete base_; }
       Status WriteAt(uint64_t offset, const Slice& data) {
         if (env_->manifest_write_error_.Acquire_Load() != NULL) {
@@ -149,6 +159,7 @@ class SpecialEnv : public EnvWrapper {
         }
       }
       Status Close() { return base_->Close(); }
+      Status Flush() { return base_->Flush(); }
       Status Sync() {
         if (env_->manifest_sync_error_.Acquire_Load() != NULL) {
           return Status::IOError("simulated sync error");
@@ -162,7 +173,7 @@ class SpecialEnv : public EnvWrapper {
       return Status::IOError("simulated write error");
     }
 
-    Status s = target()->NewWritableFile(f, r);
+    Status s = target()->NewConcurrentWritableFile(f, r);
     if (s.ok()) {
       if (strstr(f.c_str(), ".ldb") != NULL ||
           strstr(f.c_str(), ".log") != NULL) {
@@ -490,7 +501,7 @@ class DBTest {
     FileType type;
     for (size_t i = 0; i < filenames.size(); i++) {
       if (ParseFileName(filenames[i], &number, &type) && type == kTableFile) {
-        ASSERT_OK(env_->DeleteFile(SSTTableFileName(dbname_, number)));
+        ASSERT_OK(env_->DeleteFile(TableFileName(dbname_, number)));
         return true;
       }
     }
@@ -498,7 +509,7 @@ class DBTest {
   }
 
   // Returns number of files renamed.
-  int RenameLDBToSST() {
+  int RenameSSTToLDB() {
     std::vector<std::string> filenames;
     ASSERT_OK(env_->GetChildren(dbname_, &filenames));
     uint64_t number;
@@ -506,8 +517,8 @@ class DBTest {
     int files_renamed = 0;
     for (size_t i = 0; i < filenames.size(); i++) {
       if (ParseFileName(filenames[i], &number, &type) && type == kTableFile) {
-        const std::string from = SSTTableFileName(dbname_, number);
-        const std::string to = TableFileName(dbname_, number);
+        const std::string from = TableFileName(dbname_, number);
+        const std::string to = LDBTableFileName(dbname_, number);
         ASSERT_OK(env_->RenameFile(from, to));
         files_renamed++;
       }
@@ -631,7 +642,6 @@ TEST(DBTest, GetPicksCorrectFile) {
   } while (ChangeOptions());
 }
 
-#if 0
 TEST(DBTest, GetEncountersEmptyLevel) {
   do {
     // Arrange for the following to happen:
@@ -670,7 +680,6 @@ TEST(DBTest, GetEncountersEmptyLevel) {
     ASSERT_EQ(NumTableFilesAtLevel(0), 0);
   } while (ChangeOptions());
 }
-#endif
 
 TEST(DBTest, IterEmpty) {
   Iterator* iter = db_->NewIterator(ReadOptions());
@@ -982,10 +991,10 @@ TEST(DBTest, CompactionsGenerateMultipleFiles) {
 
   Random rnd(301);
 
-  // Write 32MB (320 values, each 100K)
+  // Write 9MB (90 values, each 100K)
   ASSERT_EQ(NumTableFilesAtLevel(0), 0);
   std::vector<std::string> values;
-  for (int i = 0; i < 320; i++) {
+  for (int i = 0; i < 90; i++) {
     values.push_back(RandomString(&rnd, 100000));
     ASSERT_OK(Put(Key(i), values[i]));
   }
@@ -996,13 +1005,13 @@ TEST(DBTest, CompactionsGenerateMultipleFiles) {
 
   ASSERT_EQ(NumTableFilesAtLevel(0), 0);
   ASSERT_GT(NumTableFilesAtLevel(1), 1);
-  for (int i = 0; i < 320; i++) {
+  for (int i = 0; i < 80; i++) {
     ASSERT_EQ(Get(Key(i)), values[i]);
   }
 }
 
-#if 0
 // In HyperLevelDB, this test is useless because we have no "max files" cap.
+#if 0
 TEST(DBTest, RepeatedWritesToSameKey) {
   Options options = CurrentOptions();
   options.env = env_;
@@ -1674,7 +1683,7 @@ TEST(DBTest, StillReadSST) {
   dbfull()->TEST_CompactMemTable();
   ASSERT_EQ("bar", Get("foo"));
   Close();
-  ASSERT_GT(RenameLDBToSST(), 0);
+  ASSERT_GT(RenameSSTToLDB(), 0);
   Options options = CurrentOptions();
   options.paranoid_checks = true;
   Status s = TryReopen(&options);

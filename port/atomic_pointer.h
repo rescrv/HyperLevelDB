@@ -110,7 +110,7 @@ class AtomicPointer {
  private:
   void* rep_;
  public:
-  AtomicPointer() { }
+  AtomicPointer() : rep_(NULL) { }
   explicit AtomicPointer(void* p) : rep_(p) {}
   inline void* NoBarrier_Load() const { return rep_; }
   inline void NoBarrier_Store(void* v) { rep_ = v; }

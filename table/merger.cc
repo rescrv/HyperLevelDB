@@ -12,16 +12,22 @@ namespace leveldb {
 
 namespace {
 class MergingIterator : public Iterator {
+ private:
+  void ReinitializeComparisons();
+  void ReinitializeCurrentComparison();
  public:
   MergingIterator(const Comparator* comparator, Iterator** children, int n)
       : comparator_(comparator),
         children_(new IteratorWrapper[n]),
+        comparisons_(new uint64_t[n]),
         n_(n),
+        comparisons_intialized_(false),
         current_(NULL),
         direction_(kForward) {
     for (int i = 0; i < n; i++) {
       children_[i].Set(children[i]);
     }
+    ReinitializeComparisons();
   }
 
   virtual ~MergingIterator() {
@@ -36,6 +42,7 @@ class MergingIterator : public Iterator {
     for (int i = 0; i < n_; i++) {
       children_[i].SeekToFirst();
     }
+    ReinitializeComparisons();
     FindSmallest();
     direction_ = kForward;
   }
@@ -44,6 +51,7 @@ class MergingIterator : public Iterator {
     for (int i = 0; i < n_; i++) {
       children_[i].SeekToLast();
     }
+    ReinitializeComparisons();
     FindLargest();
     direction_ = kReverse;
   }
@@ -52,6 +60,7 @@ class MergingIterator : public Iterator {
     for (int i = 0; i < n_; i++) {
       children_[i].Seek(target);
     }
+    ReinitializeComparisons();
     FindSmallest();
     direction_ = kForward;
   }
@@ -75,10 +84,12 @@ class MergingIterator : public Iterator {
           }
         }
       }
+      ReinitializeComparisons();
       direction_ = kForward;
     }
 
     current_->Next();
+    ReinitializeCurrentComparison();
     FindSmallest();
   }
 
@@ -104,10 +115,12 @@ class MergingIterator : public Iterator {
           }
         }
       }
+      ReinitializeComparisons();
       direction_ = kReverse;
     }
 
     current_->Prev();
+    ReinitializeCurrentComparison();
     FindLargest();
   }
 
@@ -141,7 +154,9 @@ class MergingIterator : public Iterator {
   // of children in leveldb.
   const Comparator* comparator_;
   IteratorWrapper* children_;
+  uint64_t* comparisons_;
   int n_;
+  bool comparisons_intialized_;
   IteratorWrapper* current_;
 
   // Which direction is the iterator moving?
@@ -152,15 +167,34 @@ class MergingIterator : public Iterator {
   Direction direction_;
 };
 
+void MergingIterator::ReinitializeComparisons() {
+  for (int i = 0; i < n_; ++i) {
+    if (children_[i].Valid()) {
+      comparisons_[i] = comparator_->KeyNum(children_[i].key());
+    }
+  }
+}
+
+void MergingIterator::ReinitializeCurrentComparison() {
+  if (current_->Valid()) {
+    comparisons_[current_ - children_] = comparator_->KeyNum(current_->key());
+  }
+}
+
 void MergingIterator::FindSmallest() {
+  size_t smallest_idx = 0;
   IteratorWrapper* smallest = NULL;
   for (int i = 0; i < n_; i++) {
     IteratorWrapper* child = &children_[i];
     if (child->Valid()) {
       if (smallest == NULL) {
         smallest = child;
-      } else if (comparator_->Compare(child->key(), smallest->key()) < 0) {
+        smallest_idx = i;
+      } else if (comparisons_[i] < comparisons_[smallest_idx] ||
+                 (comparisons_[i] == comparisons_[smallest_idx] &&
+                  comparator_->Compare(child->key(), smallest->key()) < 0)) {
         smallest = child;
+        smallest_idx = i;
       }
     }
   }
@@ -168,14 +202,19 @@ void MergingIterator::FindSmallest() {
 }
 
 void MergingIterator::FindLargest() {
+  size_t largest_idx = 0;
   IteratorWrapper* largest = NULL;
   for (int i = n_-1; i >= 0; i--) {
     IteratorWrapper* child = &children_[i];
     if (child->Valid()) {
       if (largest == NULL) {
         largest = child;
-      } else if (comparator_->Compare(child->key(), largest->key()) > 0) {
+        largest_idx = i;
+      } else if (comparisons_[i] > comparisons_[largest_idx] ||
+                 (comparisons_[i] == comparisons_[largest_idx] &&
+                  comparator_->Compare(child->key(), largest->key()) > 0)) {
         largest = child;
+        largest_idx = i;
       }
     }
   }

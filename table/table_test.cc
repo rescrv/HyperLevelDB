@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+#define __STDC_LIMIT_MACROS
+
 #include "hyperleveldb/table.h"
 
 #include <map>
@@ -94,6 +96,7 @@ class StringSink: public WritableFile {
   const std::string& contents() const { return contents_; }
 
   virtual Status Close() { return Status::OK(); }
+  virtual Status Flush() { return Status::OK(); }
   virtual Status Sync() { return Status::OK(); }
 
   virtual Status WriteAt(uint64_t offset, const Slice& slice) {

@@ -13,7 +13,7 @@
 
 namespace leveldb {
 
-class WritableFile;
+class ConcurrentWritableFile;
 
 namespace log {
 
@@ -22,14 +22,13 @@ class Writer {
   // Create a writer that will append data to "*dest".
   // "*dest" must be initially empty.
   // "*dest" must remain live while this Writer is in use.
-  explicit Writer(WritableFile* dest);
+  explicit Writer(ConcurrentWritableFile* dest);
   ~Writer();
 
   Status AddRecord(const Slice& slice);
 
  private:
-  WritableFile* dest_;
-  port::Mutex offset_mtx_;
+  ConcurrentWritableFile* dest_;
   uint64_t offset_; // Current offset in file
 
   // crc32c values for all supported record types.  These are
@@ -37,6 +36,7 @@ class Writer {
   // record type stored in the header.
   uint32_t type_crc_[kMaxRecordType + 1];
 
+  uint64_t ComputeRecordSize(uint64_t start, uint64_t remain);
   Status EmitPhysicalRecordAt(RecordType type, const char* ptr, uint64_t offset, size_t length);
 
   // No copying allowed

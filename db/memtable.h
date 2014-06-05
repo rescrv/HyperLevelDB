@@ -10,6 +10,7 @@
 #include "db/dbformat.h"
 #include "db/skiplist.h"
 #include "util/arena.h"
+#include "util/atomic.h"
 
 namespace leveldb {
 
@@ -24,15 +25,13 @@ class MemTable {
   explicit MemTable(const InternalKeyComparator& comparator);
 
   // Increase reference count.
-  // XXX use a release increment if not using GCC intrinsics
-  void Ref() { __sync_add_and_fetch(&refs_, 1); }
+  void Ref() { atomic::increment_64_fullbarrier(&refs_, 1); }
 
   // Drop reference count.  Delete if no more references exist.
-  // XXX use an acquire decrement if not using GCC intrinsics
   void Unref() {
-    int refs = __sync_sub_and_fetch(&refs_, 1);
-    assert(refs >= 0);
-    if (refs <= 0) {
+    uint64_t ref = atomic::increment_64_fullbarrier(&refs_, -1);
+    assert(ref >= 0);
+    if (refs_ == 0) {
       delete this;
     }
   }
@@ -67,21 +66,25 @@ class MemTable {
 
  private:
   ~MemTable();  // Private since only Unref() should be used to delete it
-  typedef std::pair<uint64_t, const char*> TableKey;
 
   struct KeyComparator {
     const InternalKeyComparator comparator;
     explicit KeyComparator(const InternalKeyComparator& c) : comparator(c) { }
-    int operator()(TableKey a, TableKey b) const;
+    int operator()(const char* a, const char* b) const;
+  };
+  struct KeyExtractor {
+    const InternalKeyComparator comparator;
+    explicit KeyExtractor(const InternalKeyComparator& c) : comparator(c) { }
+    uint64_t operator()(const char* k) const;
   };
   friend class MemTableIterator;
   friend class MemTableBackwardIterator;
 
-  typedef SkipList<TableKey, KeyComparator> Table;
+  typedef SkipList<const char*, KeyComparator, KeyExtractor> Table;
 
   KeyComparator comparator_;
-  int refs_;
-  port::Mutex mtx_;
+  KeyExtractor extractor_;
+  uint64_t refs_;
   Arena arena_;
   Table table_;
 

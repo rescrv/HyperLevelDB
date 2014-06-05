@@ -27,6 +27,7 @@ class RandomAccessFile;
 class SequentialFile;
 class Slice;
 class WritableFile;
+class ConcurrentWritableFile;
 
 class Env {
  public:
@@ -68,6 +69,8 @@ class Env {
   // The returned file will only be accessed by one thread at a time.
   virtual Status NewWritableFile(const std::string& fname,
                                  WritableFile** result) = 0;
+  virtual Status NewConcurrentWritableFile(const std::string& fname,
+                                           ConcurrentWritableFile** result) = 0;
 
   // Returns true iff the named file exists.
   virtual bool FileExists(const std::string& fname) = 0;
@@ -223,19 +226,35 @@ class WritableFile {
   WritableFile() { }
   virtual ~WritableFile();
 
-  // Allows concurrent writers
-  // REQUIRES:  The range of data falling in [offset, offset + data.size()) must
-  // only be written once.
-  virtual Status WriteAt(uint64_t offset, const Slice& data) = 0;
   // REQUIRES:  external synchronization
   virtual Status Append(const Slice& data) = 0;
   virtual Status Close() = 0;
+  virtual Status Flush() = 0;
   virtual Status Sync() = 0;
 
  private:
   // No copying allowed
   WritableFile(const WritableFile&);
-  void operator=(const WritableFile&);
+  WritableFile& operator=(const WritableFile&);
+};
+
+// A file abstraction for concurrent nearly-sequential writing.  The
+// implementation should provide buffering, and must permit multiple callers to
+// call the public methods simultaneously.
+class ConcurrentWritableFile : public WritableFile {
+ public:
+  ConcurrentWritableFile() { }
+  virtual ~ConcurrentWritableFile();
+
+  // Allows concurrent writers
+  // REQUIRES:  The range of data falling in [offset, offset + data.size()) must
+  // only be written once.
+  virtual Status WriteAt(uint64_t offset, const Slice& data) = 0;
+
+ private:
+  // No copying allowed
+  ConcurrentWritableFile(const ConcurrentWritableFile&);
+  ConcurrentWritableFile& operator=(const ConcurrentWritableFile&);
 };
 
 // An interface for writing log messages.
@@ -301,6 +320,9 @@ class EnvWrapper : public Env {
   }
   Status NewWritableFile(const std::string& f, WritableFile** r) {
     return target_->NewWritableFile(f, r);
+  }
+  Status NewConcurrentWritableFile(const std::string& f, ConcurrentWritableFile** r) {
+    return target_->NewConcurrentWritableFile(f, r);
   }
   bool FileExists(const std::string& f) { return target_->FileExists(f); }
   Status GetChildren(const std::string& dir, std::vector<std::string>* r) {

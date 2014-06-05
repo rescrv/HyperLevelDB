@@ -9,13 +9,15 @@
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "util/atomic.h"
+#include "util/mutexlock.h"
 
 namespace leveldb {
 
 class Arena {
  public:
   Arena();
-  ~Arena();
+  ~Arena() throw ();
 
   // Return a pointer to a newly allocated memory block of "bytes" bytes.
   char* Allocate(size_t bytes);
@@ -26,42 +28,25 @@ class Arena {
   // Returns an estimate of the total memory usage of data allocated
   // by the arena (including space allocated but not yet used for user
   // allocations).
-  size_t MemoryUsage() const {
-    return blocks_memory_ + blocks_.capacity() * sizeof(char*);
-  }
+  uint64_t MemoryUsage() { return atomic::load_64_nobarrier(&memory_usage_); }
 
  private:
-  char* AllocateFallback(size_t bytes);
-  char* AllocateNewBlock(size_t block_bytes);
+  struct Block;
 
-  // Allocation state
-  char* alloc_ptr_;
-  size_t alloc_bytes_remaining_;
+  Block* NewBlock(size_t bytes);
+  char* AllocateLarge(size_t bytes);
+  char* AllocateFinalize(Block* b, size_t bytes);
 
-  // Array of new[] allocated memory blocks
-  std::vector<char*> blocks_;
-
-  // Bytes of memory in blocks allocated so far
-  size_t blocks_memory_;
+  const size_t align_;
+  const size_t page_size_;
+  uint64_t memory_usage_;
+  Block* blocks_;
+  Block* large_;
 
   // No copying allowed
   Arena(const Arena&);
   void operator=(const Arena&);
 };
-
-inline char* Arena::Allocate(size_t bytes) {
-  // The semantics of what to return are a bit messy if we allow
-  // 0-byte allocations, so we disallow them here (we don't need
-  // them for our internal use).
-  assert(bytes > 0);
-  if (bytes <= alloc_bytes_remaining_) {
-    char* result = alloc_ptr_;
-    alloc_ptr_ += bytes;
-    alloc_bytes_remaining_ -= bytes;
-    return result;
-  }
-  return AllocateFallback(bytes);
-}
 
 }  // namespace leveldb
 

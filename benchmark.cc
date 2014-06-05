@@ -38,6 +38,7 @@
 
 // e
 #include <e/popt.h>
+#include <e/time.h>
 
 // ygor
 #include <ygor.h>
@@ -45,9 +46,14 @@
 static long _done = 0;
 static long _number = 1000000;
 static long _threads = 1;
+static long _backup = 0;
 static long _write_buf = 64ULL * 1024ULL * 1024ULL;
+static long _block_size = 4096;
 static const char* _output = "benchmark.dat";
 static const char* _dir = ".";
+
+static void
+backup_thread(leveldb::DB*, ygor_data_logger* dl);
 
 static void
 worker_thread(leveldb::DB*, ygor_data_logger* dl,
@@ -68,15 +74,21 @@ main(int argc, const char* argv[])
             .description("run the test with T concurrent threads (default: 1)")
             .metavar("T")
             .as_long(&_threads);
-    ap.arg().name('w', "write-buffer")
-            .description("write buffer size (default: 64MB)")
-            .as_long(&_write_buf);
     ap.arg().name('o', "output")
             .description("output file for benchmark results (default: benchmark.dat)")
             .as_string(&_output);
     ap.arg().name('d', "db-dir")
             .description("directory for leveldb storage (default: .)")
             .as_string(&_dir);
+    ap.arg().name('w', "write-buffer")
+            .description("write buffer size (default: 64MB)")
+            .as_long(&_write_buf);
+    ap.arg().name('B', "block-size")
+            .description("block size (default: 4KB)")
+            .as_long(&_block_size);
+    ap.arg().name('b', "backup")
+            .description("perform a live backup every N seconds (default: 0 (no backup))")
+            .as_long(&_backup);
     const std::auto_ptr<armnod_argparser> key_parser(armnod_argparser::create("key-"));
     const std::auto_ptr<armnod_argparser> value_parser(armnod_argparser::create("value-"));
     ap.add("Key Generation:", key_parser->parser());
@@ -91,6 +103,7 @@ main(int argc, const char* argv[])
     leveldb::Options opts;
     opts.create_if_missing = true;
     opts.write_buffer_size = _write_buf;
+    opts.block_size = _block_size;
     opts.filter_policy = leveldb::NewBloomFilterPolicy(10);
     leveldb::DB* db;
     leveldb::Status st = leveldb::DB::Open(opts, _dir, &db);
@@ -112,6 +125,13 @@ main(int argc, const char* argv[])
 
     typedef std::tr1::shared_ptr<po6::threads::thread> thread_ptr;
     std::vector<thread_ptr> threads;
+
+    if (_backup > 0)
+    {
+        thread_ptr t(new po6::threads::thread(std::tr1::bind(backup_thread, db, dl)));
+        threads.push_back(t);
+        t->start();
+    }
 
     for (size_t i = 0; i < _threads; ++i)
     {
@@ -142,6 +162,47 @@ main(int argc, const char* argv[])
     return EXIT_SUCCESS;
 }
 
+#define BILLION (1000ULL * 1000ULL * 1000ULL)
+
+void
+backup_thread(leveldb::DB* db, ygor_data_logger* dl)
+{
+    uint64_t target = e::time() / BILLION;
+    target += _backup;
+    uint64_t idx = 0;
+
+    while (__sync_fetch_and_add(&_done, 0) < _number)
+    {
+        uint64_t now = e::time() / BILLION;
+
+        if (now < target)
+        {
+            timespec ts;
+            ts.tv_sec = 0;
+            ts.tv_nsec = 250ULL * 1000ULL * 1000ULL;
+            nanosleep(&ts, NULL);
+        }
+        else
+        {
+            target = now + _backup;
+            char buf[32];
+            snprintf(buf, 32, "%05lu", idx);
+            buf[31] = '\0';
+            leveldb::Slice name(buf);
+            leveldb::Status st;
+            ygor_data_record dr;
+            dr.flags = 4;
+
+            ygor_data_logger_start(dl, &dr);
+            st = db->LiveBackup(name);
+            ygor_data_logger_finish(dl, &dr);
+            ygor_data_logger_record(dl, &dr);
+            assert(st.ok());
+            ++idx;
+        }
+    }
+}
+
 void
 worker_thread(leveldb::DB* db,
               ygor_data_logger* dl,
@@ -150,26 +211,24 @@ worker_thread(leveldb::DB* db,
 {
     armnod_generator* key(armnod_generator_create(_k));
     armnod_generator* val(armnod_generator_create(_v));
-    armnod_generator_seed(key, 0xdeadbeef);
-    armnod_generator_seed(val, 0x1eaff00d);
+        const char* v = armnod_generate(val);
+        size_t v_sz = strlen(v);
 
     while (__sync_fetch_and_add(&_done, 1) < _number)
     {
         const char* k = armnod_generate(key);
-        const char* v = armnod_generate(val);
         size_t k_sz = strlen(k);
-        size_t v_sz = strlen(v);
 
         // issue a "get"
-        std::string tmp;
-        leveldb::ReadOptions ropts;
+        //std::string tmp;
+        //leveldb::ReadOptions ropts;
         ygor_data_record dr;
-        dr.flags = 1;
-        ygor_data_logger_start(dl, &dr);
-        leveldb::Status rst = db->Get(ropts, leveldb::Slice(k, k_sz), &tmp);
-        ygor_data_logger_finish(dl, &dr);
-        ygor_data_logger_record(dl, &dr);
-        assert(rst.ok() || rst.IsNotFound());
+        //dr.flags = 1;
+        //ygor_data_logger_start(dl, &dr);
+        //leveldb::Status rst = db->Get(ropts, leveldb::Slice(k, k_sz), &tmp);
+        //ygor_data_logger_finish(dl, &dr);
+        //ygor_data_logger_record(dl, &dr);
+        //assert(rst.ok() || rst.IsNotFound());
 
         // issue a "put"
         leveldb::WriteOptions wopts;

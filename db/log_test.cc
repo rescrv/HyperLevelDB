@@ -38,7 +38,7 @@ static std::string RandomSkewedString(int i, Random* rnd) {
 
 class LogTest {
  private:
-  class StringDest : public WritableFile {
+  class StringDest : public ConcurrentWritableFile {
    public:
     std::string contents_;
 

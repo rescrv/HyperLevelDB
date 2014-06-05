@@ -13,6 +13,8 @@
 //    len: varint32
 //    data: uint8[len]
 
+#define __STDC_LIMIT_MACROS
+
 #include "hyperleveldb/write_batch.h"
 
 #include "hyperleveldb/db.h"

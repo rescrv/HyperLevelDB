@@ -5,6 +5,8 @@
 #ifndef STORAGE_LEVELDB_DB_DB_IMPL_H_
 #define STORAGE_LEVELDB_DB_DB_IMPL_H_
 
+#define __STDC_LIMIT_MACROS
+
 #include <deque>
 #include <list>
 #include <set>
@@ -128,16 +130,13 @@ class DBImpl : public DB {
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   void SequenceWriteEnd(Writer* w)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  // REQUIRES: writers_mutex_ not held
+  void WaitOutWriters();
 
   static void CompactLevelWrapper(void* db)
   { reinterpret_cast<DBImpl*>(db)->CompactLevelThread(); }
   void CompactLevelThread();
   Status BackgroundCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-
-  static void CompactOptimisticWrapper(void* db)
-  { reinterpret_cast<DBImpl*>(db)->CompactOptimisticThread(); }
-  void CompactOptimisticThread();
-  Status OptimisticCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   void RecordBackgroundError(const Status& s);
 
@@ -177,8 +176,9 @@ class DBImpl : public DB {
   uint32_t seed_;                // For sampling.
 
   // Synchronize writers
-  uint64_t __attribute__ ((aligned (8))) writers_upper_;
-  Writer** writers_tail_;
+  port::Mutex writers_mutex_;
+  uint64_t writers_upper_;
+  Writer* writers_tail_;
 
   SnapshotList snapshots_;
 
@@ -195,9 +195,6 @@ class DBImpl : public DB {
   port::CondVar bg_compaction_cv_;
   // Communicate with memtable->L0 background thread
   port::CondVar bg_memtable_cv_;
-  // Communicate with the optimistic background thread
-  bool bg_optimistic_trip_;
-  port::CondVar bg_optimistic_cv_;
   // Mutual exlusion protecting the LogAndApply func
   port::CondVar bg_log_cv_;
   bool bg_log_occupied_;
@@ -226,6 +223,8 @@ class DBImpl : public DB {
   // Information for ongoing backup processes
   port::CondVar backup_cv_;
   port::AtomicPointer backup_in_progress_; // non-NULL in progress
+  uint64_t backup_waiters_; // how many threads waiting to backup
+  bool backup_waiter_has_it_;
   bool backup_deferred_delete_; // DeleteObsoleteFiles delayed by backup; protect with mutex_
 
   // Have we encountered a background error in paranoid mode?

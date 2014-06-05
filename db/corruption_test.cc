@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+#define __STDC_LIMIT_MACROS
+
 #include "hyperleveldb/db.h"
 
 #include <errno.h>
@@ -261,7 +263,7 @@ TEST(CorruptionTest, TableFileRepair) {
 }
 
 TEST(CorruptionTest, TableFileIndexData) {
-  Build(10000);  // Enough to build multiple Tables
+  Build(7500);  // Enough to build multiple Tables
   DBImpl* dbi = reinterpret_cast<DBImpl*>(db_);
   dbi->TEST_CompactMemTable();
 

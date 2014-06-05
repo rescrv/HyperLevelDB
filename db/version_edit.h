@@ -22,7 +22,7 @@ struct FileMetaData {
   InternalKey smallest;       // Smallest internal key served by table
   InternalKey largest;        // Largest internal key served by table
 
-  FileMetaData() : refs(0), allowed_seeks(1 << 30), file_size(0) { }
+  FileMetaData() : refs(0), allowed_seeks(1 << 30), number(0), file_size(0), smallest(), largest() { }
 };
 
 class VersionEdit {

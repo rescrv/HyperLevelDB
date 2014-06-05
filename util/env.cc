@@ -18,6 +18,9 @@ RandomAccessFile::~RandomAccessFile() {
 WritableFile::~WritableFile() {
 }
 
+ConcurrentWritableFile::~ConcurrentWritableFile() {
+}
+
 Logger::~Logger() {
 }
 

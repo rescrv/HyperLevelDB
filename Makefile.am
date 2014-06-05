@@ -136,6 +136,7 @@ libhyperleveldb_la_SOURCES += table/table_builder.cc
 libhyperleveldb_la_SOURCES += table/table.cc
 libhyperleveldb_la_SOURCES += table/two_level_iterator.cc
 libhyperleveldb_la_SOURCES += util/arena.cc
+libhyperleveldb_la_SOURCES += util/atomic.cc
 libhyperleveldb_la_SOURCES += util/bloom.cc
 libhyperleveldb_la_SOURCES += util/cache.cc
 libhyperleveldb_la_SOURCES += util/coding.cc
@@ -159,6 +160,7 @@ TESTHARNESS = util/testharness.cc $(TESTUTIL)
 noinst_PROGRAMS =
 noinst_PROGRAMS += db_bench
 noinst_PROGRAMS += leveldbutil
+noinst_PROGRAMS += leveldb-dump-all
 noinst_PROGRAMS += leveldb-verify
 
 EXTRA_PROGRAMS =
@@ -206,6 +208,9 @@ db_bench_tree_db_LDADD = -lkyotocabinet
 
 leveldbutil_SOURCES = db/leveldb_main.cc
 leveldbutil_LDADD = libhyperleveldb.la -lpthread
+
+leveldb_dump_all_SOURCES = leveldb-dump-all.cc
+leveldb_dump_all_LDADD = libhyperleveldb.la -lpthread
 
 leveldb_verify_SOURCES = leveldb-verify.cc
 leveldb_verify_LDADD = libhyperleveldb.la -lpthread

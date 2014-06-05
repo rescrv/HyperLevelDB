@@ -21,6 +21,7 @@
 /depcomp
 /hyperleveldb.upack
 /install-sh
+/leveldb-dump-all
 /leveldbutil
 /leveldb-verify
 /libhyperleveldb.pc

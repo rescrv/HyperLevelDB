@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+#define __STDC_LIMIT_MACROS
+
 #include "db/version_set.h"
 
 #include <algorithm>
@@ -24,7 +26,7 @@ namespace leveldb {
 static double MaxBytesForLevel(int level) {
   assert(level < leveldb::config::kNumLevels);
   static const double bytes[] = {10 * 1048576.0,
-                                 100 * 1048576.0,
+                                 10 * 1048576.0,
                                  100 * 1048576.0,
                                  1000 * 1048576.0,
                                  10000 * 1048576.0,
@@ -33,15 +35,27 @@ static double MaxBytesForLevel(int level) {
   return bytes[level];
 }
 
+static uint64_t MinFileSizeForLevel(int level) {
+  assert(level < leveldb::config::kNumLevels);
+  static const uint64_t bytes[] = {2 * 1048576,
+                                   2 * 1048576,
+                                   2 * 1048576,
+                                   2 * 1048576,
+                                   2 * 1048576,
+                                   2 * 1048576,
+                                   2 * 1048576};
+  return bytes[level];
+}
+
 static uint64_t MaxFileSizeForLevel(int level) {
   assert(level < leveldb::config::kNumLevels);
   static const uint64_t bytes[] = {8 * 1048576,
-                                   8 * 1048576,
-                                   8 * 1048576,
-                                   8 * 1048576,
-                                   8 * 1048576,
-                                   8 * 1048576,
-                                   8 * 1048576};
+                                   32 * 1048576,
+                                   64 * 1048576,
+                                   128 * 1048576,
+                                   256 * 1048576,
+                                   512 * 1048576,
+                                   512 * 1048576};
   return bytes[level];
 }
 
@@ -872,7 +886,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu, port::CondVar
     assert(descriptor_file_ == NULL);
     new_manifest_file = DescriptorFileName(dbname_, manifest_file_number_);
     edit->SetNextFile(next_file_number_);
-    s = env_->NewWritableFile(new_manifest_file, &descriptor_file_);
+    s = env_->NewConcurrentWritableFile(new_manifest_file, &descriptor_file_);
     if (s.ok()) {
       descriptor_log_ = new log::Writer(descriptor_file_);
       s = WriteSnapshot(descriptor_log_);
@@ -1050,6 +1064,8 @@ void VersionSet::MarkFileNumberUsed(uint64_t number) {
 
 void VersionSet::Finalize(Version* v) {
   // Compute the ratio of disk usage to its limit
+  uint64_t sum_level_bytes = 0;
+  uint64_t sum_max_bytes = 0;
   for (int level = 0; level + 1 < config::kNumLevels; ++level) {
     double score;
     if (level == 0) {
@@ -1069,7 +1085,18 @@ void VersionSet::Finalize(Version* v) {
     } else {
       // Compute the ratio of current size to size limit.
       const uint64_t level_bytes = TotalFileSize(v->files_[level]);
-      score = static_cast<double>(level_bytes) / MaxBytesForLevel(level);
+      const uint64_t max_bytes = MaxBytesForLevel(level);
+      sum_level_bytes += level_bytes;
+      sum_max_bytes += max_bytes;
+      double score1 = static_cast<double>(level_bytes) / max_bytes;
+      double score2 = static_cast<double>(sum_level_bytes) / sum_max_bytes;
+      assert(score1 >= 0.0);
+      assert(score2 >= 0.0);
+      if (score1 > 0 && sum_level_bytes >> 2 > level_bytes) {
+        score = std::max(score1, score2);
+      } else {
+        score = score1;
+      }
     }
     v->compaction_scores_[level] = score;
   }
@@ -1336,13 +1363,11 @@ void VersionSet::GetCompactionBoundaries(Version* v,
 int VersionSet::PickCompactionLevel(bool* locked, bool seek_driven) const {
   // Find an unlocked level has score >= 1 where level + 1 has score < 1.
   int level = config::kNumLevels;
-  for (int i = 0; i + 1 < config::kNumLevels; ++i) {
+  for (int i = config::kNumLevels - 2; i >= 0; --i) {
     if (locked[i] || locked[i + 1]) {
       continue;
     }
-    if (current_->compaction_scores_[i + 0] >= 1.0 &&
-        (i + 2 >= config::kNumLevels ||
-         current_->compaction_scores_[i + 1] < 1.0)) {
+    if (current_->compaction_scores_[i] >= 1.0) {
       level = i;
       break;
     }
@@ -1353,6 +1378,11 @@ int VersionSet::PickCompactionLevel(bool* locked, bool seek_driven) const {
       !locked[current_->file_to_compact_level_ + 0] &&
       !locked[current_->file_to_compact_level_ + 1]) {
     level = current_->file_to_compact_level_;
+  }
+  if (!locked[0] && !locked[1] &&
+      current_->compaction_scores_[0] >= 1.0 &&
+      current_->compaction_scores_[1] <= 0.1) {
+    level = 0;
   }
   return level;
 }
@@ -1420,15 +1450,7 @@ Compaction* VersionSet::PickCompaction(Version* v, int level) {
       }
       trivial = level != 0;
       c->SetRatio(1.0);
-    // If the best we could do would be wasteful and the best level has more
-    // data in it than the next level would have, move it all
-    } else if (level < 4 && best_ratio >= 0.0 &&
-               LA_sizes.back() * best_ratio >= LB_sizes.back()) {
-      for (size_t i = 0 ; i < LA.size(); ++i) {
-        c->inputs_[0].push_back(LA[i]);
-      }
-      c->SetRatio(double(LA_sizes.back()) / double(LB_sizes.back()));
-    // otherwise go with the best ratio
+    // go with the best ratio
     } else if (best_ratio >= 0.0) {
       for (size_t i = best_idx_start; i < best_idx_limit; ++i) {
         assert(i >= 0 && i < LA.size());
@@ -1478,9 +1500,21 @@ Compaction* VersionSet::PickCompaction(Version* v, int level) {
 
 void VersionSet::SetupOtherInputs(Compaction* c) {
   const int level = c->level();
+  assert(level + 1 < config::kNumLevels);
   InternalKey smallest, largest;
   GetRange(c->inputs_[0], &smallest, &largest);
   c->input_version_->GetOverlappingInputs(level+1, &smallest, &largest, &c->inputs_[1]);
+  if (level + 2 < config::kNumLevels) {
+    const Comparator* user_cmp = icmp_.user_comparator();
+    std::vector<FileMetaData*> tmp;
+    c->input_version_->GetOverlappingInputs(level+2, &smallest, &largest, &tmp);
+    for (size_t i = 0; i < tmp.size(); ++i) {
+      leveldb::Slice smallest = tmp[i]->smallest.user_key();
+      leveldb::Slice largest = tmp[i]->largest.user_key();
+      c->boundaries_.push_back(std::make_pair(user_cmp->KeyNum(smallest), smallest));
+      c->boundaries_.push_back(std::make_pair(user_cmp->KeyNum(largest), largest));
+    }
+  }
 
   // Update the place where we will do the next compaction for this level.
   // We update this immediately instead of waiting for the VersionEdit
@@ -1527,6 +1561,7 @@ Compaction* VersionSet::CompactRange(
 
 Compaction::Compaction(int level)
     : level_(level),
+      min_output_file_size_(MinFileSizeForLevel(level)),
       max_output_file_size_(MaxFileSizeForLevel(level)),
       input_version_(NULL),
       ratio_(0) {
@@ -1539,6 +1574,28 @@ Compaction::~Compaction() {
   if (input_version_ != NULL) {
     input_version_->Unref();
   }
+}
+
+bool Compaction::CrossesBoundary(const ParsedInternalKey& old_key,
+                                 const ParsedInternalKey& new_key) const {
+  const Comparator* user_cmp = input_version_->vset_->icmp_.user_comparator();
+  uint64_t lower_num = user_cmp->KeyNum(old_key.user_key);
+  uint64_t upper_num = user_cmp->KeyNum(old_key.user_key);
+  if (lower_num == upper_num) {
+    return false;
+  }
+  for (size_t i = 0; i < boundaries_.size(); ++i) {
+    bool lower = lower < boundaries_[i].first ||
+                 (lower == boundaries_[i].first &&
+                  user_cmp->Compare(old_key.user_key, boundaries_[i].second) <= 0);
+    bool upper = upper > boundaries_[i].first ||
+                 (upper == boundaries_[i].first &&
+                  user_cmp->Compare(old_key.user_key, boundaries_[i].second) > 0);
+    if (lower && upper) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool Compaction::IsTrivialMove() const {

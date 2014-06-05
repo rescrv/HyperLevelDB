@@ -35,7 +35,7 @@ class TableBuilder;
 class TableCache;
 class Version;
 class VersionSet;
-class WritableFile;
+class ConcurrentWritableFile;
 
 // Return the smallest index i such that files[i]->largest >= key.
 // Return files.size() if there is no such file.
@@ -215,10 +215,11 @@ class VersionSet {
   // Return the last sequence number.
   uint64_t LastSequence() const { return last_sequence_; }
 
-  // Set the last sequence number to s.
+  // Set the last sequence number to s, if it's not already larger
   void SetLastSequence(uint64_t s) {
-    assert(s >= last_sequence_);
-    last_sequence_ = s;
+    if (last_sequence_ <= s) {
+      last_sequence_ = s;
+    }
   }
 
   // Mark the specified file number as used.
@@ -323,7 +324,7 @@ class VersionSet {
   uint64_t prev_log_number_;  // 0 or backing store for memtable being compacted
 
   // Opened lazily
-  WritableFile* descriptor_file_;
+  ConcurrentWritableFile* descriptor_file_;
   log::Writer* descriptor_log_;
   Version dummy_versions_;  // Head of circular doubly-linked list of versions.
   Version* current_;        // == dummy_versions_.prev_
@@ -356,8 +357,16 @@ class Compaction {
   // Return the ith input file at "level()+which" ("which" must be 0 or 1).
   FileMetaData* input(int which, int i) const { return inputs_[which][i]; }
 
+  // Minimum size of files to build during this compaction.
+  uint64_t MinOutputFileSize() const { return min_output_file_size_; }
+
   // Maximum size of files to build during this compaction.
   uint64_t MaxOutputFileSize() const { return max_output_file_size_; }
+
+  // Does the transition from old_key to new_key cross any boundaries at a
+  // higher level?
+  bool CrossesBoundary(const ParsedInternalKey& old_key,
+                       const ParsedInternalKey& new_key) const;
 
   // Is this a trivial compaction that can be implemented by just
   // moving a single input file to the next level (no merging or splitting)
@@ -389,14 +398,17 @@ class Compaction {
   explicit Compaction(int level);
 
   int level_;
+  uint64_t min_output_file_size_;
   uint64_t max_output_file_size_;
   Version* input_version_;
   VersionEdit edit_;
 
   double ratio_;
 
-  // Each compaction reads inputs from "level_" and "level_+1"
-  std::vector<FileMetaData*> inputs_[2];      // The two sets of inputs
+  // Each compaction reads inputs from "level_" and "level_+1", and avoids
+  // writing generating overlap in "level_+2".
+  std::vector<FileMetaData*> inputs_[2]; // The three sets of inputs
+  std::vector<std::pair<uint64_t, leveldb::Slice> > boundaries_;
 
   // State for implementing IsBaseLevelForKey
 
