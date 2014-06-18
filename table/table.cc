@@ -18,6 +18,16 @@
 namespace leveldb {
 
 struct Table::Rep {
+  Rep()
+    : options(),
+      status(),
+      file(NULL),
+      cache_id(),
+      filter(),
+      filter_data(),
+      metaindex_handle(),
+      index_block() {
+  }
   ~Rep() {
     delete filter;
     delete [] filter_data;
@@ -33,6 +43,10 @@ struct Table::Rep {
 
   BlockHandle metaindex_handle;  // Handle to metaindex_block: saved from footer
   Block* index_block;
+
+ private:
+  Rep(const Rep&);
+  Rep& operator = (const Rep&);
 };
 
 Status Table::Open(const Options& options,
@@ -134,11 +148,11 @@ Table::~Table() {
   delete rep_;
 }
 
-static void DeleteBlock(void* arg, void* ignored) {
+static void DeleteBlock(void* arg, void* /*ignored*/) {
   delete reinterpret_cast<Block*>(arg);
 }
 
-static void DeleteCachedBlock(const Slice& key, void* value) {
+static void DeleteCachedBlock(const Slice& /*key*/, void* value) {
   Block* block = reinterpret_cast<Block*>(value);
   delete block;
 }

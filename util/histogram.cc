@@ -92,12 +92,12 @@ double Histogram::Percentile(double p) const {
 }
 
 double Histogram::Average() const {
-  if (num_ == 0.0) return 0;
+  if (num_ <= 0.0) return 0;
   return sum_ / num_;
 }
 
 double Histogram::StandardDeviation() const {
-  if (num_ == 0.0) return 0;
+  if (num_ <= 0.0) return 0;
   double variance = (sum_squares_ * num_ - sum_ * sum_) / (num_ * num_);
   return sqrt(variance);
 }
@@ -111,7 +111,7 @@ std::string Histogram::ToString() const {
   r.append(buf);
   snprintf(buf, sizeof(buf),
            "Min: %.4f  Median: %.4f  Max: %.4f\n",
-           (num_ == 0.0 ? 0.0 : min_), Median(), max_);
+           (num_ <= 0.0 ? 0.0 : min_), Median(), max_);
   r.append(buf);
   r.append("------------------------------------------------------\n");
   const double mult = 100.0 / num_;

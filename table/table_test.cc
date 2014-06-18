@@ -311,7 +311,7 @@ class KeyConvertingIterator: public Iterator {
   }
 
   virtual Slice value() const { return iter_->value(); }
-  virtual Status status() const {
+  virtual const Status& status() const {
     return status_.ok() ? iter_->status() : status_;
   }
 

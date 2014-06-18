@@ -14,7 +14,7 @@ namespace leveldb {
 
 Comparator::~Comparator() { }
 
-uint64_t Comparator::KeyNum(const Slice& key) const {
+uint64_t Comparator::KeyNum(const Slice& /*key*/) const {
   return 0;
 }
 

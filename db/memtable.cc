@@ -25,6 +25,7 @@ MemTable::MemTable(const InternalKeyComparator& cmp)
     : comparator_(cmp),
       extractor_(cmp),
       refs_(0),
+      arena_(),
       table_(comparator_, extractor_, &arena_) {
 }
 
@@ -44,6 +45,9 @@ int MemTable::KeyComparator::operator()(const char* aptr, const char* bptr)
 
 uint64_t MemTable::KeyExtractor::operator()(const char* k)
     const {
+  if (!k) {
+    return UINT64_MAX;
+  }
   uint32_t key_length;
   const char* key_ptr = GetVarint32Ptr(k, k+5, &key_length);
   return comparator.user_comparator()->KeyNum(Slice(key_ptr, key_length - 8));
@@ -61,7 +65,7 @@ static const char* EncodeKey(std::string* scratch, const Slice& target) {
 
 class MemTableIterator: public Iterator {
  public:
-  explicit MemTableIterator(MemTable::Table* table) : iter_(table) { }
+  explicit MemTableIterator(MemTable::Table* table) : iter_(table), tmp_(), status_(Status::OK()) { }
 
   virtual bool Valid() const { return iter_.Valid(); }
   virtual void Seek(const Slice& k) { iter_.Seek(EncodeKey(&tmp_, k)); }
@@ -75,11 +79,12 @@ class MemTableIterator: public Iterator {
     return GetLengthPrefixedSlice(key_slice.data() + key_slice.size());
   }
 
-  virtual Status status() const { return Status::OK(); }
+  virtual const Status& status() const { return status_; }
 
  private:
   MemTable::Table::Iterator iter_;
   std::string tmp_;       // For passing to EncodeKey
+  Status status_;
 
   // No copying allowed
   MemTableIterator(const MemTableIterator&);
@@ -112,7 +117,7 @@ void MemTable::Add(SequenceNumber s, ValueType type,
   p += 8;
   p = EncodeVarint32(p, val_size);
   memcpy(p, value.data(), val_size);
-  assert((p + val_size) - buf == encoded_len);
+  assert(static_cast<size_t>((p + val_size) - buf) == encoded_len);
   table_.Insert(buf);
 }
 
@@ -147,6 +152,8 @@ bool MemTable::Get(const LookupKey& key, std::string* value, Status* s) {
         case kTypeDeletion:
           *s = Status::NotFound(Slice());
           return true;
+        default:
+          break;
       }
     }
   }

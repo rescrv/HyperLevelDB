@@ -16,7 +16,7 @@ namespace log {
 Writer::Writer(ConcurrentWritableFile* dest)
     : dest_(dest),
       offset_(0) {
-  for (int i = 0; i <= kMaxRecordType; i++) {
+  for (unsigned i = 0; i <= kMaxRecordType; i++) {
     char t = static_cast<char>(i);
     type_crc_[i] = crc32c::Value(&t, 1);
   }
@@ -73,7 +73,8 @@ Status Writer::AddRecord(const Slice& slice) {
       offset += leftover;
     }
     // Invariant: we never leave < kHeaderSize bytes in a block.
-    assert(kBlockSize - block_offset - kHeaderSize >= 0);
+    assert(kBlockSize >= block_offset);
+    assert(kBlockSize - block_offset >= kHeaderSize);
 
     const size_t avail = kBlockSize - block_offset - kHeaderSize;
     const size_t fragment_length = (left < avail) ? left : avail;

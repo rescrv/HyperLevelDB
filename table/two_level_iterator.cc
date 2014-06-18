@@ -42,8 +42,7 @@ class TwoLevelIterator: public Iterator {
     assert(Valid());
     return data_iter_.value();
   }
-  virtual Status status() const {
-    // It'd be nice if status() returned a const Status& instead of a Status
+  virtual const Status& status() const {
     if (!index_iter_.status().ok()) {
       return index_iter_.status();
     } else if (data_iter_.iter() != NULL && !data_iter_.status().ok()) {
@@ -54,6 +53,8 @@ class TwoLevelIterator: public Iterator {
   }
 
  private:
+  TwoLevelIterator(const TwoLevelIterator&);
+  TwoLevelIterator& operator = (const TwoLevelIterator&);
   void SaveError(const Status& s) {
     if (status_.ok() && !s.ok()) status_ = s;
   }
@@ -81,8 +82,10 @@ TwoLevelIterator::TwoLevelIterator(
     : block_function_(block_function),
       arg_(arg),
       options_(options),
+      status_(),
       index_iter_(index_iter),
-      data_iter_(NULL) {
+      data_iter_(NULL),
+      data_block_handle_() {
 }
 
 TwoLevelIterator::~TwoLevelIterator() {

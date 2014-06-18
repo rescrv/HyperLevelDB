@@ -65,7 +65,7 @@ class Iterator {
   virtual Slice value() const = 0;
 
   // If an error has occurred, return it.  Else return an ok status.
-  virtual Status status() const = 0;
+  virtual const Status& status() const = 0;
 
   // Clients are allowed to register function/arg1/arg2 triples that
   // will be invoked when this iterator is destroyed.

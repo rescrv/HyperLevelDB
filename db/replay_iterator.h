@@ -48,6 +48,7 @@ class ReplayIteratorImpl : public ReplayIterator {
   void cleanup(); // calls delete this;
 
  private:
+  friend class DB;
   virtual ~ReplayIteratorImpl();
   bool ParseKey(ParsedInternalKey* ikey);
   bool ParseKey(const Slice& k, ParsedInternalKey* ikey);

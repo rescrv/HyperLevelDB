@@ -15,6 +15,7 @@
 #include <vector>
 #include "hyperleveldb/slice.h"
 #include "util/hash.h"
+#include "util/string_builder.h"
 
 namespace leveldb {
 
@@ -38,7 +39,7 @@ class FilterBlockBuilder {
   void GenerateFilter();
 
   const FilterPolicy* policy_;
-  std::string keys_;              // Flattened key contents
+  StringBuilder keys_;            // Flattened key contents
   std::vector<size_t> start_;     // Starting index in keys_ of each key
   std::string result_;            // Filter data computed so far
   std::vector<Slice> tmp_keys_;   // policy_->CreateFilter() argument

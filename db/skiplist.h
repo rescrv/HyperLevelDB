@@ -41,7 +41,6 @@ template<typename Key, class Comparator, class Extractor>
 class SkipList {
  private:
   struct Node;
-  enum { kMaxHeight = 9 };
 
  public:
   // Create a new SkipList object that will use "cmp" for comparing keys,
@@ -51,7 +50,6 @@ class SkipList {
 
   // Insert key into the list.
   // REQUIRES: nothing that compares equal to key is currently in the list.
-  // REQUIRES: external synchronization.
   void Insert(const Key& key);
 
   // Returns true iff an entry that compares equal to key is in the list.
@@ -97,19 +95,18 @@ class SkipList {
   };
 
  private:
+  enum { kMaxHeight = 17 };
+
   // Immutable after construction
   Comparator const compare_;
   Extractor const extractor_;
   Arena* const arena_;    // Arena used for allocations of nodes
 
-  Node nodes_arr_[1 << 8];
-  Node* nodes_;
+  Node* const head_;
 
   // Read/written only by Insert().
   port::Mutex rnd_mutex_;
   Random rnd_;
-
-  bool IsSpacerNode(Node* n) const { return nodes_ <= n && n < nodes_ + (1 << 8); }
 
   Node* NewNode(const Key& key, unsigned height);
   int RandomHeight();
@@ -125,12 +122,12 @@ class SkipList {
   // node at "level" for every level in [0..max_height_-1].
   Node* FindGreaterOrEqual(const Key& key, Node** prev, Node** obs) const;
 
-  // Return the latest non-spacer node that comes before "node"
-  // Return NULL if there is no such node.
-  Node* FindLessThan(Node* node) const;
+  // Return the latest node with a key < key.
+  // Return head_ if there is no such node.
+  Node* FindLessThan(const Key& key) const;
 
   // Return the last node in the list.
-  // Return NULL if list is spacers-only.
+  // Return head_ if list is empty.
   Node* FindLast() const;
 
   // No copying allowed
@@ -141,61 +138,70 @@ class SkipList {
 // Implementation details follow
 template<typename Key, class Comparator, class Extractor>
 struct SkipList<Key,Comparator,Extractor>::Node {
-  explicit Node() : cmp(), key() {
-  }
-  explicit Node(uint64_t c, const Key& k) : cmp(c), key(k) {
-    for (unsigned i = 0; i < kMaxHeight; ++i) {
-      atomic::store_32_nobarrier(&cmp_[i], UINT32_MAX);
-      atomic::store_ptr_nobarrier(&next_[i], reinterpret_cast<Node*>(NULL));
-    }
-  }
+  explicit Node(uint64_t c, const Key& k) : cmp(c), key(k) {}
 
   uint64_t const cmp;
   Key const key;
 
-  // Accessors/mutators for links.  Wrapped in methods so we can
-  // add the appropriate barriers as necessary.
-  Node* Next(unsigned n) {
+  void SetNext(unsigned n, uint64_t c, Node* x) {
     assert(n < kMaxHeight);
-    return atomic::load_ptr_acquire(&next_[n]);
-  }
-  void GetNext(unsigned n, uint32_t* c, Node** x) {
-    *c = atomic::load_32_acquire(&cmp_[n]);
-    *x = atomic::load_ptr_acquire(&next_[n]);
-  }
-  void SetNext(unsigned n, uint32_t c, Node* x) {
-    assert(n < kMaxHeight);
-    atomic::store_ptr_release(&next_[n], x);
-    atomic::store_32_release(&cmp_[n], c);
+    atomic::store_ptr_release(&ptrs_[n].next, x);
+    atomic::store_64_release(&ptrs_[n].cmp, c);
   }
   bool CasNext(unsigned n, Node* old_node, Node* new_node) {
     using namespace atomic;
-    if (compare_and_swap_ptr_release(&next_[n], old_node, new_node) == old_node) {
-      uint32_t new_cmp = new_node->cmp >> 32;
-      uint32_t expected = UINT32_MAX;
+    if (compare_and_swap_ptr_release(&ptrs_[n].next, old_node, new_node) == old_node) {
+      uint64_t new_cmp = new_node->cmp;
+      uint64_t expected = UINT64_MAX;
       while (expected > new_cmp) {
-        expected = compare_and_swap_32_release(&cmp_[n], expected, new_cmp);
+        expected = compare_and_swap_64_release(&ptrs_[n].cmp, expected, new_cmp);
       }
       return true;
     } else {
       return false;
     }
   }
-  void NoBarrier_GetNext(unsigned n, uint32_t* c, Node** x) { GetNext(n, c, x); }
-  void NoBarrier_SetNext(unsigned n, uint32_t c, Node* x) { SetNext(n, c, x); }
+
+  // Accessors/mutators for links.  Wrapped in methods so we can
+  // add the appropriate barriers as necessary.
+  uint64_t NoBarrier_Cmp(unsigned n) {
+    return atomic::load_64_nobarrier(&ptrs_[n].cmp);
+  }
+  Node* NoBarrier_Next(unsigned n) {
+    return atomic::load_ptr_nobarrier(&ptrs_[n].next);
+  }
+  Node* Next(unsigned n) {
+    return atomic::load_ptr_acquire(&ptrs_[n].next);
+  }
+  void GetNext(unsigned n, uint64_t* c, Node** x) {
+    *c = atomic::load_64_acquire(&ptrs_[n].cmp);
+    *x = atomic::load_ptr_acquire(&ptrs_[n].next);
+  }
+  void NoBarrier_SetNext(unsigned n, uint64_t c, Node* x) {
+    atomic::store_ptr_nobarrier(&ptrs_[n].next, x);
+    atomic::store_64_nobarrier(&ptrs_[n].cmp, c);
+  }
+
+  struct PointerHintPair {
+    uint64_t cmp;
+    Node* next;
+  };
 
  private:
-  uint32_t cmp_[kMaxHeight];
-  Node* next_[kMaxHeight];
+  PointerHintPair ptrs_[1];
 };
 
 template<typename Key, class Comparator, class Extractor>
 typename SkipList<Key,Comparator,Extractor>::Node*
 SkipList<Key,Comparator,Extractor>::NewNode(const Key& key, unsigned height) {
   char* mem = arena_->AllocateAligned(
-      sizeof(Node) + sizeof(port::AtomicPointer) * (height - 1));
+      sizeof(Node) + sizeof(typename Node::PointerHintPair) * (height - 1));
   uint64_t cmp = extractor_(key);
-  return new (mem) Node(cmp, key);
+  Node* n = new (mem) Node(cmp, key);
+  for (unsigned i = 0; i < height; ++i) {
+    n->NoBarrier_SetNext(i, UINT64_MAX, NULL);
+  }
+  return n;
 }
 
 template<typename Key, class Comparator, class Extractor>
@@ -219,9 +225,6 @@ template<typename Key, class Comparator, class Extractor>
 inline void SkipList<Key,Comparator,Extractor>::Iterator::Next() {
   assert(Valid());
   node_ = node_->Next(0);
-  while (node_ && list_->IsSpacerNode(node_)) {
-    node_ = node_->Next(0);
-  }
 }
 
 template<typename Key, class Comparator, class Extractor>
@@ -229,29 +232,28 @@ inline void SkipList<Key,Comparator,Extractor>::Iterator::Prev() {
   // Instead of using explicit "prev" links, we just search for the
   // last node that falls before key.
   assert(Valid());
-  node_ = list_->FindLessThan(node_);
-  assert(!node_ || !list_->IsSpacerNode(node_));
+  node_ = list_->FindLessThan(node_->key);
+  if (node_ == list_->head_) {
+    node_ = NULL;
+  }
 }
 
 template<typename Key, class Comparator, class Extractor>
 inline void SkipList<Key,Comparator,Extractor>::Iterator::Seek(const Key& target) {
   node_ = list_->FindGreaterOrEqual(target, NULL, NULL);
-  while (node_ && list_->IsSpacerNode(node_)) {
-    node_ = node_->Next(0);
-  }
 }
 
 template<typename Key, class Comparator, class Extractor>
 inline void SkipList<Key,Comparator,Extractor>::Iterator::SeekToFirst() {
-  node_ = list_->nodes_[0].Next(0);
-  while (node_ && list_->IsSpacerNode(node_)) {
-    node_ = node_->Next(0);
-  }
+  node_ = list_->head_->Next(0);
 }
 
 template<typename Key, class Comparator, class Extractor>
 inline void SkipList<Key,Comparator,Extractor>::Iterator::SeekToLast() {
   node_ = list_->FindLast();
+  if (node_ == list_->head_) {
+    node_ = NULL;
+  }
 }
 
 template<typename Key, class Comparator, class Extractor>
@@ -272,7 +274,6 @@ int SkipList<Key,Comparator,Extractor>::RandomHeight() {
 template<typename Key, class Comparator, class Extractor>
 bool SkipList<Key,Comparator,Extractor>::KeyIsAfterNode(const Key& key, Node* n) const {
   // NULL n is considered infinite
-  assert(!IsSpacerNode(n));
   return (n != NULL) && (compare_(n->key, key) < 0);
 }
 
@@ -280,11 +281,43 @@ template<typename Key, class Comparator, class Extractor>
 typename SkipList<Key,Comparator,Extractor>::Node* SkipList<Key,Comparator,Extractor>::FindGreaterOrEqual(const Key& key, Node** prev, Node** obs)
     const {
   const uint64_t cmp = extractor_(key);
+  Node* x = head_;
+  int level = kMaxHeight - 1;
+  while (true) {
+    while (level > 0 && x->NoBarrier_Cmp(level) > cmp) {
+      if (prev != NULL) prev[level] = x;
+      if (obs != NULL) obs[level] = NULL;
+      --level;
+    }
+    uint64_t c = 0;
+    Node* next = NULL;
+    x->GetNext(level, &c, &next);
+    if (c < cmp || KeyIsAfterNode(key, next)) {
+      // Keep searching in this list
+      x = next;
+    } else {
+      if (prev != NULL) prev[level] = x;
+      if (obs != NULL) obs[level] = next;
+      if (level == 0) {
+        return next;
+      } else {
+        // Switch to next list
+        --level;
+      }
+    }
+  }
+}
+
+#if 0
+template<typename Key, class Comparator, class Extractor>
+typename SkipList<Key,Comparator,Extractor>::Node* SkipList<Key,Comparator,Extractor>::FindGreaterOrEqual(const Key& key, Node** prev, Node** obs)
+    const {
+  const uint64_t cmp = extractor_(key);
   Node* x = &nodes_[cmp >> 56];
   int level = kMaxHeight - 1;
-  const uint32_t mask = cmp >> 32;
+  const uint64_t mask = cmp >> 32;
   while (true) {
-    uint32_t c = 0;
+    uint64_t c = 0;
     Node* next = NULL;
     x->GetNext(level, &c, &next);
 
@@ -303,68 +336,37 @@ typename SkipList<Key,Comparator,Extractor>::Node* SkipList<Key,Comparator,Extra
     }
   }
 }
+#endif
 
 template<typename Key, class Comparator, class Extractor>
 typename SkipList<Key,Comparator,Extractor>::Node*
-SkipList<Key,Comparator,Extractor>::FindLessThan(Node* node) const {
-  Node* non_spacer = NULL;
-  Node* x = &nodes_[0];
-  while (x != node) {
-    if (!IsSpacerNode(x)) {
-      non_spacer = x;
-    }
-    x = x->Next(0);
-  }
-  return non_spacer;
-  // XXX this block is broken, but could be more efficient if correct
-#if 0
-  Node* x = NULL;
-  for (unsigned i = 0; i <= node->cmp >> 56; ++i) {
-    if (!IsSpacerNode(nodes_[i].Next(0))) {
-      x = &nodes_[i];
-    }
-  }
-  x = x ? x : &nodes_[node->cmp >> 56];
-  unsigned level = kMaxHeight - 1;
-  const uint32_t mask = x->cmp >> 32;
+SkipList<Key,Comparator,Extractor>::FindLessThan(const Key& key) const {
+  Node* x = head_;
+  int level = kMaxHeight - 1;
   while (true) {
-    uint32_t c = 0;
-    Node* next = NULL;
-    x->GetNext(level, &c, &next);
-    if (!IsSpacerNode(x)) {
-      non_spacer = x;
-    }
-    if (c >= mask && level > 0) {
-      // Switch to next list
-      --level;
-    } else if (c > mask || next == node) {
-      assert(level == 0);
-      return non_spacer;
+    assert(x == head_ || compare_(x->key, key) < 0);
+    Node* next = x->Next(level);
+    if (next == NULL || compare_(next->key, key) >= 0) {
+      if (level == 0) {
+        return x;
+      } else {
+        // Switch to next list
+        level--;
+      }
     } else {
       x = next;
     }
   }
-#endif
 }
 
 template<typename Key, class Comparator, class Extractor>
 typename SkipList<Key,Comparator,Extractor>::Node* SkipList<Key,Comparator,Extractor>::FindLast()
     const {
-  Node* x = NULL;
-  for (int i = (1 << 8) - 1; i >= 0; --i) {
-    if (nodes_[i].Next(0) &&
-        !IsSpacerNode(nodes_[i].Next(0))) {
-      x = &nodes_[i];
-      break;
-    }
-  }
-  if (!x) {
-    return NULL;
-  }
+  Node* x = head_;
   int level = kMaxHeight - 1;
   while (true) {
     Node* next = x->Next(level);
-    if (next == NULL || IsSpacerNode(next)) {
+    if (next == NULL) {
       if (level == 0) {
         return x;
       } else {
@@ -382,23 +384,11 @@ SkipList<Key,Comparator,Extractor>::SkipList(Comparator cmp, Extractor ext, Aren
     : compare_(cmp),
       extractor_(ext),
       arena_(arena),
-      nodes_(NULL),
+      head_(NewNode(0 /* any key will do */, kMaxHeight)),
       rnd_mutex_(),
       rnd_(0xdeadbeef) {
-  for (uint64_t idx = 0; idx < (1 << 8); ++idx) {
-    uint64_t c = idx << 56;
-    nodes_arr_[idx].~Node();
-    new (&nodes_arr_[idx]) Node(c, Key());
-  }
-  nodes_ = nodes_arr_;
-  for (uint64_t idx = 0; idx + 1 < (1 << 8); ++idx) {
-    for (uint64_t level = 0; level < kMaxHeight; ++level) {
-      nodes_[idx].SetNext(level, nodes_[idx + 1].cmp >> 32, nodes_ + idx + 1);
-    }
-  }
-  for (uint64_t level = 0; level < kMaxHeight; ++level) {
-    const uint64_t idx = (1 << 8) - 1;
-    nodes_[idx].SetNext(level, UINT32_MAX, NULL);
+  for (int i = 0; i < kMaxHeight; i++) {
+    head_->SetNext(i, UINT64_MAX, NULL);
   }
 }
 
@@ -411,7 +401,7 @@ void SkipList<Key,Comparator,Extractor>::Insert(const Key& key) {
   Node* x = FindGreaterOrEqual(key, prev, obs);
 
   // Our data structure does not allow duplicate insertion
-  assert(x == NULL || IsSpacerNode(x) || !Equal(key, x->key));
+  assert(x == NULL || !Equal(key, x->key));
 
   int height = RandomHeight();
 
@@ -419,19 +409,18 @@ void SkipList<Key,Comparator,Extractor>::Insert(const Key& key) {
   for (int i = 0; i < height; i++) {
     while (true) {
       Node* n = obs[i];
-      uint32_t c = n ? n->cmp >> 32 : UINT32_MAX;
+      uint64_t c = n ? n->cmp : UINT64_MAX;
       x->NoBarrier_SetNext(i, c, n);
-      if (c >= x->cmp >> 32 && prev[i]->CasNext(i, n, x)) {
+      if (c >= x->cmp && prev[i]->CasNext(i, n, x)) {
         break;
       }
 
       // advance and retry the CAS
       while (true) {
-        uint32_t c = 0;
+        c = 0;
         obs[i] = NULL;
         prev[i]->GetNext(i, &c, &obs[i]);
-        if (!IsSpacerNode(obs[i]) &&
-            (c < x->cmp >> 32 || KeyIsAfterNode(x->key, obs[i]))) {
+        if (c < x->cmp || KeyIsAfterNode(x->key, obs[i])) {
           prev[i] = obs[i];
         } else {
           break;
@@ -444,7 +433,7 @@ void SkipList<Key,Comparator,Extractor>::Insert(const Key& key) {
 template<typename Key, class Comparator, class Extractor>
 bool SkipList<Key,Comparator,Extractor>::Contains(const Key& key) const {
   Node* x = FindGreaterOrEqual(key, NULL, NULL);
-  if (x != NULL && !IsSpacerNode(x) && Equal(key, x->key)) {
+  if (x != NULL && Equal(key, x->key)) {
     return true;
   } else {
     return false;

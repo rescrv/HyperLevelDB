@@ -37,6 +37,8 @@ static Status IOError(const std::string& context, int err_number) {
 
 class PosixSequentialFile: public SequentialFile {
  private:
+  PosixSequentialFile(const PosixSequentialFile&);
+  PosixSequentialFile& operator = (const PosixSequentialFile&);
   std::string filename_;
   FILE* file_;
 
@@ -98,7 +100,9 @@ class PosixRandomAccessFile: public RandomAccessFile {
 class MmapLimiter {
  public:
   // Up to 1000 mmaps for 64-bit binaries; none for smaller pointer sizes.
-  MmapLimiter() {
+  MmapLimiter()
+    : mu_(),
+      allowed_() {
     SetAllowed(sizeof(void*) >= 8 ? 1000 : 0);
   }
 
@@ -144,6 +148,8 @@ class MmapLimiter {
 // mmap() based random-access
 class PosixMmapReadableFile: public RandomAccessFile {
  private:
+  PosixMmapReadableFile(const PosixMmapReadableFile&);
+  PosixMmapReadableFile& operator = (const PosixMmapReadableFile&);
   std::string filename_;
   void* mmapped_region_;
   size_t length_;
@@ -163,7 +169,7 @@ class PosixMmapReadableFile: public RandomAccessFile {
   }
 
   virtual Status Read(uint64_t offset, size_t n, Slice* result,
-                      char* scratch) const {
+                      char* /*scratch*/) const {
     Status s;
     if (offset + n > length_) {
       *result = Slice();
@@ -177,6 +183,8 @@ class PosixMmapReadableFile: public RandomAccessFile {
 
 class PosixWritableFile : public WritableFile {
  private:
+  PosixWritableFile(const PosixWritableFile&);
+  PosixWritableFile& operator = (const PosixWritableFile&);
   std::string filename_;
   FILE* file_;
 
@@ -262,6 +270,8 @@ class PosixWritableFile : public WritableFile {
 // knows enough to skip zero suffixes.
 class PosixMmapFile : public ConcurrentWritableFile {
  private:
+  PosixMmapFile(const PosixMmapFile&);
+  PosixMmapFile& operator = (const PosixMmapFile&);
   struct MmapSegment{
     char* base_;
   };
@@ -436,7 +446,8 @@ class PosixMmapFile : public ConcurrentWritableFile {
       return s;
     }
     for (size_t i = 0; i < segments_sz; ++i) {
-      if (munmap(segments[i].base_, block_size_) < 0) {
+      if (segments[i].base_ != NULL &&
+          munmap(segments[i].base_, block_size_) < 0) {
         s = IOError(filename_, errno);
       }
     }
@@ -524,6 +535,7 @@ static int LockOrUnlock(int fd, bool lock) {
 
 class PosixFileLock : public FileLock {
  public:
+  PosixFileLock() : fd_(-1), name_() { }
   int fd_;
   std::string name_;
 };
@@ -536,6 +548,7 @@ class PosixLockTable {
   port::Mutex mu_;
   std::set<std::string> locked_files_;
  public:
+  PosixLockTable() : mu_(), locked_files_() { }
   bool Insert(const std::string& fname) {
     MutexLock l(&mu_);
     return locked_files_.insert(fname).second;
@@ -685,8 +698,8 @@ class PosixEnv : public Env {
 
   virtual Status CopyFile(const std::string& src, const std::string& target) {
     Status result;
-    int fd1;
-    int fd2;
+    int fd1 = -1;
+    int fd2 = -1;
 
     if (result.ok() && (fd1 = open(src.c_str(), O_RDONLY)) < 0) {
       result = IOError(src, errno);
@@ -842,7 +855,13 @@ class PosixEnv : public Env {
 };
 
 PosixEnv::PosixEnv() : page_size_(getpagesize()),
-                       started_bgthread_(false) {
+                       mu_(),
+                       bgsignal_(),
+                       bgthread_(),
+                       started_bgthread_(false),
+                       queue_(),
+                       locks_(),
+                       mmap_limit_() {
   PthreadCall("mutex_init", pthread_mutex_init(&mu_, NULL));
   PthreadCall("cvar_init", pthread_cond_init(&bgsignal_, NULL));
 }

@@ -113,7 +113,7 @@ class RandomGenerator {
   int pos_;
 
  public:
-  RandomGenerator() {
+  RandomGenerator() : data_(), pos_() {
     // We use a limited amount of data over and over again and ensure
     // that it is larger than the compression window (32KB), and also
     // large enough to serve all typical value sizes we want to write.
@@ -171,7 +171,18 @@ class Stats {
   std::string message_;
 
  public:
-  Stats() { Start(); }
+  Stats() 
+    : start_(),
+      finish_(),
+      seconds_(),
+      done_(),
+      next_report_(),
+      bytes_(),
+      last_op_finish_(),
+      hist_(),
+      message_() {
+    Start();
+  }
 
   void Start() {
     next_report_ = 100;
@@ -281,7 +292,14 @@ struct SharedState {
   int num_done;
   bool start;
 
-  SharedState() : cv(&mu) { }
+  SharedState()
+    : mu(),
+      cv(&mu),
+      total(),
+      num_initialized(),
+      num_done(),
+      start() {
+  }
 };
 
 // Per-thread state for concurrent executions of the same benchmark.
@@ -293,14 +311,21 @@ struct ThreadState {
 
   ThreadState(int index)
       : tid(index),
-        rand(1000 + index) {
+        rand(1000 + index),
+        stats(),
+        shared() {
   }
+ private:
+  ThreadState(const ThreadState&);
+  ThreadState& operator = (const ThreadState&);
 };
 
 }  // namespace
 
 class Benchmark {
  private:
+  Benchmark(const Benchmark&);
+  Benchmark& operator = (const Benchmark&);
   Cache* cache_;
   const FilterPolicy* filter_policy_;
   DB* db_;
@@ -395,6 +420,7 @@ class Benchmark {
     num_(FLAGS_num),
     value_size_(FLAGS_value_size),
     entries_per_batch_(1),
+    write_options_(),
     reads_(FLAGS_reads < 0 ? FLAGS_num : FLAGS_reads),
     heap_counter_(0) {
     std::vector<std::string> files;
@@ -887,7 +913,7 @@ class Benchmark {
     }
   }
 
-  void Compact(ThreadState* thread) {
+  void Compact(ThreadState* /*thread*/) {
     db_->CompactRange(NULL, NULL);
   }
 

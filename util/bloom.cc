@@ -21,9 +21,9 @@ class BloomFilterPolicy : public FilterPolicy {
 
  public:
   explicit BloomFilterPolicy(int bits_per_key)
-      : bits_per_key_(bits_per_key) {
+      : bits_per_key_(bits_per_key),
+        k_(static_cast<size_t>(bits_per_key * 0.69)) /* 0.69 =~ ln(2) */ {
     // We intentionally round down to reduce probing cost a little bit
-    k_ = static_cast<size_t>(bits_per_key * 0.69);  // 0.69 =~ ln(2)
     if (k_ < 1) k_ = 1;
     if (k_ > 30) k_ = 30;
   }
@@ -47,7 +47,7 @@ class BloomFilterPolicy : public FilterPolicy {
     dst->resize(init_size + bytes, 0);
     dst->push_back(static_cast<char>(k_));  // Remember # of probes in filter
     char* array = &(*dst)[init_size];
-    for (size_t i = 0; i < n; i++) {
+    for (int i = 0; i < n; i++) {
       // Use double-hashing to generate a sequence of hash values.
       // See analysis in [Kirsch,Mitzenmacher 2006].
       uint32_t h = BloomHash(keys[i]);

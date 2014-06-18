@@ -67,7 +67,7 @@ class DBImpl : public DB {
   // Extra methods (for testing) that are not in the public DB interface
 
   // Compact any files in the named level that overlap [*begin,*end]
-  void TEST_CompactRange(int level, const Slice* begin, const Slice* end);
+  void TEST_CompactRange(unsigned level, const Slice* begin, const Slice* end);
 
   // Force current memtable contents to be compacted.
   Status TEST_CompactMemTable();
@@ -201,11 +201,21 @@ class DBImpl : public DB {
 
   // Information for a manual compaction
   struct ManualCompaction {
-    int level;
+    ManualCompaction()
+      : level(),
+        done(),
+        begin(),
+        end(),
+        tmp_storage() {
+    }
+    unsigned level;
     bool done;
     const InternalKey* begin;   // NULL means beginning of key range
     const InternalKey* end;     // NULL means end of key range
     InternalKey tmp_storage;    // Used to keep track of compaction progress
+   private:
+    ManualCompaction(const ManualCompaction&);
+    ManualCompaction& operator = (const ManualCompaction&);
   };
   ManualCompaction* manual_compaction_;
 

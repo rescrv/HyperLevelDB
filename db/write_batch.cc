@@ -28,7 +28,8 @@ namespace leveldb {
 // WriteBatch header has an 8-byte sequence number followed by a 4-byte count.
 static const size_t kHeader = 12;
 
-WriteBatch::WriteBatch() {
+WriteBatch::WriteBatch()
+  : rep_() {
   Clear();
 }
 
@@ -113,6 +114,10 @@ void WriteBatch::Delete(const Slice& key) {
 namespace {
 class MemTableInserter : public WriteBatch::Handler {
  public:
+  MemTableInserter()
+    : sequence_(),
+      mem_() {
+  }
   SequenceNumber sequence_;
   MemTable* mem_;
 
@@ -124,6 +129,9 @@ class MemTableInserter : public WriteBatch::Handler {
     mem_->Add(sequence_, kTypeDeletion, key, Slice());
     sequence_++;
   }
+ private:
+  MemTableInserter(const MemTableInserter&);
+  MemTableInserter& operator = (const MemTableInserter&);
 };
 }  // namespace
 

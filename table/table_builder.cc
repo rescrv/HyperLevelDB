@@ -49,15 +49,23 @@ struct TableBuilder::Rep {
         index_block_options(opt),
         file(f),
         offset(0),
+        status(),
         data_block(&options),
         index_block(&index_block_options),
+        last_key(),
         num_entries(0),
         closed(false),
         filter_block(opt.filter_policy == NULL ? NULL
                      : new FilterBlockBuilder(opt.filter_policy)),
-        pending_index_entry(false) {
+        pending_index_entry(false),
+        pending_handle(),
+        compressed_output() {
     index_block_options.block_restart_interval = 1;
   }
+
+ private:
+  Rep(const Rep&);
+  Rep& operator = (const Rep&);
 };
 
 TableBuilder::TableBuilder(const Options& options, WritableFile* file)
@@ -93,9 +101,11 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
   Rep* r = rep_;
   assert(!r->closed);
   if (!ok()) return;
+#ifdef STRICT_ASSERT
   if (r->num_entries > 0) {
     assert(r->options.comparator->Compare(key, Slice(r->last_key)) > 0);
   }
+#endif
 
   if (r->pending_index_entry) {
     assert(r->data_block.empty());
@@ -166,6 +176,8 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
       }
       break;
     }
+    default:
+      abort();
   }
   WriteRawBlock(block_contents, type, handle);
   r->compressed_output.clear();

@@ -97,7 +97,7 @@ class Version {
   void Unref();
 
   void GetOverlappingInputs(
-      int level,
+      unsigned level,
       const InternalKey* begin,         // NULL means before all keys
       const InternalKey* end,           // NULL means after all keys
       std::vector<FileMetaData*>* inputs);
@@ -106,7 +106,7 @@ class Version {
   // some part of [*smallest_user_key,*largest_user_key].
   // smallest_user_key==NULL represents a key smaller than all keys in the DB.
   // largest_user_key==NULL represents a key largest than all keys in the DB.
-  bool OverlapInLevel(int level,
+  bool OverlapInLevel(unsigned level,
                       const Slice* smallest_user_key,
                       const Slice* largest_user_key);
 
@@ -115,7 +115,7 @@ class Version {
   int PickLevelForMemTableOutput(const Slice& smallest_user_key,
                                  const Slice& largest_user_key);
 
-  int NumFiles(int level) const { return files_[level].size(); }
+  size_t NumFiles(unsigned level) const { return files_[level].size(); }
 
   // Return a human readable string that describes this version's contents.
   std::string DebugString() const;
@@ -125,7 +125,7 @@ class Version {
   friend class VersionSet;
 
   class LevelFileNumIterator;
-  Iterator* NewConcatenatingIterator(const ReadOptions&, int level, uint64_t num) const;
+  Iterator* NewConcatenatingIterator(const ReadOptions&, unsigned level, uint64_t num) const;
 
   // Call func(arg, level, f) for every file that overlaps user_key in
   // order from newest to oldest.  If an invocation of func returns
@@ -134,7 +134,7 @@ class Version {
   // REQUIRES: user portion of internal_key == user_key.
   void ForEachOverlapping(Slice user_key, Slice internal_key,
                           void* arg,
-                          bool (*func)(void*, int, FileMetaData*));
+                          bool (*func)(void*, unsigned, FileMetaData*));
 
   VersionSet* vset_;            // VersionSet to which this Version belongs
   Version* next_;               // Next version in linked list
@@ -157,7 +157,7 @@ class Version {
       : vset_(vset), next_(this), prev_(this), refs_(0),
         file_to_compact_(NULL),
         file_to_compact_level_(-1) {
-    for (int i = 0; i < config::kNumLevels; ++i) {
+    for (unsigned i = 0; i < config::kNumLevels; ++i) {
       compaction_scores_[i] = -1;
     }
   }
@@ -207,10 +207,10 @@ class VersionSet {
   }
 
   // Return the number of Table files at the specified level.
-  int NumLevelFiles(int level) const;
+  int NumLevelFiles(unsigned level) const;
 
   // Return the combined file size of all files at the specified level.
-  int64_t NumLevelBytes(int level) const;
+  int64_t NumLevelBytes(unsigned level) const;
 
   // Return the last sequence number.
   uint64_t LastSequence() const { return last_sequence_; }
@@ -235,20 +235,20 @@ class VersionSet {
   // Pick level for a new compaction.
   // Returns kNumLevels if there is no compaction to be done.
   // Otherwise returns the lowest unlocked level that may compact upwards.
-  int PickCompactionLevel(bool* locked, bool seek_driven) const;
+  unsigned PickCompactionLevel(bool* locked, bool seek_driven) const;
 
   // Pick inputs for a new compaction at the specified level.
   // Returns NULL if there is no compaction to be done.
   // Otherwise returns a pointer to a heap-allocated object that
   // describes the compaction.  Caller should delete the result.
-  Compaction* PickCompaction(Version* v, int level);
+  Compaction* PickCompaction(Version* v, unsigned level);
 
   // Return a compaction object for compacting the range [begin,end] in
   // the specified level.  Returns NULL if there is nothing in that
   // level that overlaps the specified range.  Caller should delete
   // the result.
   Compaction* CompactRange(
-      int level,
+      unsigned level,
       const InternalKey* begin,
       const InternalKey* end);
 
@@ -298,7 +298,7 @@ class VersionSet {
                  InternalKey* largest);
 
   void GetCompactionBoundaries(Version* version,
-                               int level,
+                               unsigned level,
                                std::vector<FileMetaData*>* LA,
                                std::vector<FileMetaData*>* LB,
                                std::vector<uint64_t>* LA_sizes,
@@ -345,14 +345,14 @@ class Compaction {
 
   // Return the level that is being compacted.  Inputs from "level"
   // and "level+1" will be merged to produce a set of "level+1" files.
-  int level() const { return level_; }
+  unsigned level() const { return level_; }
 
   // Return the object that holds the edits to the descriptor done
   // by this compaction.
   VersionEdit* edit() { return &edit_; }
 
   // "which" must be either 0 or 1
-  int num_input_files(int which) const { return inputs_[which].size(); }
+  size_t num_input_files(int which) const { return inputs_[which].size(); }
 
   // Return the ith input file at "level()+which" ("which" must be 0 or 1).
   FileMetaData* input(int which, int i) const { return inputs_[which][i]; }
@@ -366,7 +366,8 @@ class Compaction {
   // Does the transition from old_key to new_key cross any boundaries at a
   // higher level?
   bool CrossesBoundary(const ParsedInternalKey& old_key,
-                       const ParsedInternalKey& new_key) const;
+                       const ParsedInternalKey& new_key,
+                       size_t* hint) const;
 
   // Is this a trivial compaction that can be implemented by just
   // moving a single input file to the next level (no merging or splitting)
@@ -384,26 +385,19 @@ class Compaction {
   // is successful.
   void ReleaseInputs();
 
-  // Set and get the ratio of inputs to outputs.
-  // If nonzero, this is the ratio of inputs to outputs.  If zero, it indicates
-  // that the compaction was chosen without concern for the ratio of inputs to
-  // outputs.
-  void SetRatio(double ratio) { ratio_ = ratio; }
-  double ratio() { return ratio_; }
-
  private:
   friend class Version;
   friend class VersionSet;
+  Compaction(const Compaction&);
+  Compaction& operator = (const Compaction&);
 
-  explicit Compaction(int level);
+  explicit Compaction(unsigned level);
 
-  int level_;
+  unsigned level_;
   uint64_t min_output_file_size_;
   uint64_t max_output_file_size_;
   Version* input_version_;
   VersionEdit edit_;
-
-  double ratio_;
 
   // Each compaction reads inputs from "level_" and "level_+1", and avoids
   // writing generating overlap in "level_+2".

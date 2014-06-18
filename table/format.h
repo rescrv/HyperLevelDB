@@ -25,11 +25,11 @@ class BlockHandle {
 
   // The offset of the block in the file.
   uint64_t offset() const { return offset_; }
-  void set_offset(uint64_t offset) { offset_ = offset; }
+  void set_offset(uint64_t _offset) { offset_ = _offset; }
 
   // The size of the stored block
   uint64_t size() const { return size_; }
-  void set_size(uint64_t size) { size_ = size; }
+  void set_size(uint64_t _size) { size_ = _size; }
 
   void EncodeTo(std::string* dst) const;
   Status DecodeFrom(Slice* input);
@@ -46,7 +46,10 @@ class BlockHandle {
 // end of every table file.
 class Footer {
  public:
-  Footer() { }
+  Footer()
+    : metaindex_handle_(),
+      index_handle_() {
+  }
 
   // The block handle for the metaindex block of the table
   const BlockHandle& metaindex_handle() const { return metaindex_handle_; }
@@ -84,6 +87,7 @@ static const uint64_t kTableMagicNumber = 0xdb4775248b80fb57ull;
 static const size_t kBlockTrailerSize = 5;
 
 struct BlockContents {
+  BlockContents() : data(), cachable(), heap_allocated() {}
   Slice data;           // Actual contents of data
   bool cachable;        // True iff data can be cached
   bool heap_allocated;  // True iff caller should delete[] data.data()

@@ -30,7 +30,6 @@ class MemTable {
   // Drop reference count.  Delete if no more references exist.
   void Unref() {
     uint64_t ref = atomic::increment_64_fullbarrier(&refs_, -1);
-    assert(ref >= 0);
     if (ref == 0) {
       delete this;
     }

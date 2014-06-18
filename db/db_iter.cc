@@ -56,6 +56,9 @@ class DBIter: public Iterator {
         user_comparator_(cmp),
         iter_(iter),
         sequence_(s),
+        status_(),
+        saved_key_(),
+        saved_value_(),
         direction_(kForward),
         valid_(false),
         rnd_(seed),
@@ -73,7 +76,7 @@ class DBIter: public Iterator {
     assert(valid_);
     return (direction_ == kForward) ? iter_->value() : saved_value_;
   }
-  virtual Status status() const {
+  virtual const Status& status() const {
     if (status_.ok()) {
       return iter_->status();
     } else {
@@ -195,6 +198,8 @@ void DBIter::FindNextUserEntry(bool skipping, std::string* skip) {
             saved_key_.clear();
             return;
           }
+          break;
+        default:
           break;
       }
     }

@@ -14,10 +14,15 @@
 #include <time.h>
 #include "hyperleveldb/env.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-format-attribute"
+
 namespace leveldb {
 
 class PosixLogger : public Logger {
  private:
+  PosixLogger(const PosixLogger&);
+  PosixLogger& operator = (const PosixLogger&);
   FILE* file_;
   uint64_t (*gettid_)();  // Return the thread id for the current thread
  public:
@@ -94,5 +99,7 @@ class PosixLogger : public Logger {
 };
 
 }  // namespace leveldb
+
+#pragma GCC diagnostic pop
 
 #endif  // STORAGE_LEVELDB_UTIL_POSIX_LOGGER_H_

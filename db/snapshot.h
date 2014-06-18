@@ -15,9 +15,17 @@ class SnapshotList;
 // Each SnapshotImpl corresponds to a particular sequence number.
 class SnapshotImpl : public Snapshot {
  public:
+  SnapshotImpl()
+    : number_(),
+      prev_(NULL),
+      next_(NULL),
+      list_(NULL) {
+  }
   SequenceNumber number_;  // const after creation
 
  private:
+  SnapshotImpl(const SnapshotImpl&);
+  SnapshotImpl& operator = (const SnapshotImpl&);
   friend class SnapshotList;
 
   // SnapshotImpl is kept in a doubly-linked circular list
@@ -29,7 +37,8 @@ class SnapshotImpl : public Snapshot {
 
 class SnapshotList {
  public:
-  SnapshotList() {
+  SnapshotList()
+    : list_() {
     list_.prev_ = &list_;
     list_.next_ = &list_;
   }

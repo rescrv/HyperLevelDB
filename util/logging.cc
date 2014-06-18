@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+#define __STDC_LIMIT_MACROS
+
 #include "util/logging.h"
 
 #include <errno.h>
@@ -61,10 +63,9 @@ bool ConsumeDecimalNumber(Slice* in, uint64_t* val) {
     char c = (*in)[0];
     if (c >= '0' && c <= '9') {
       ++digits;
-      const int delta = (c - '0');
-      static const uint64_t kMaxUint64 = ~static_cast<uint64_t>(0);
-      if (v > kMaxUint64/10 ||
-          (v == kMaxUint64/10 && delta > kMaxUint64%10)) {
+      const unsigned delta = (c - '0');
+      if (v > UINT64_MAX/10 ||
+          (v == UINT64_MAX/10 && delta > UINT64_MAX%10)) {
         // Overflow
         return false;
       }

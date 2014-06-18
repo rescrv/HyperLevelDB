@@ -65,12 +65,16 @@ bool PrintLogContents(Env* env, const std::string& fname,
 // Called on every item found in a WriteBatch.
 class WriteBatchItemPrinter : public WriteBatch::Handler {
  public:
+  WriteBatchItemPrinter()
+    : offset_(),
+      sequence_() {
+  }
   uint64_t offset_;
   uint64_t sequence_;
 
-  virtual void Put(const Slice& key, const Slice& value) {
+  virtual void Put(const Slice& /*key*/, const Slice& /*value*/) {
   }
-  virtual void Delete(const Slice& key) {
+  virtual void Delete(const Slice& /*key*/) {
   }
 };
 
@@ -178,6 +182,10 @@ bool DumpFile(Env* env, const std::string& fname) {
     case kDescriptorFile:  return DumpDescriptor(env, fname);
     case kTableFile:       return DumpTable(env, fname);
 
+    case kDBLockFile:
+    case kCurrentFile:
+    case kTempFile:
+    case kInfoLogFile:
     default: {
       fprintf(stderr, "%s: not a dump-able file type\n", fname.c_str());
       break;

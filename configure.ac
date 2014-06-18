@@ -76,11 +76,15 @@ AC_CHECK_DECLS([fdatasync])
 # Optional components
 snappy_detect_hdr=yes
 snappy_detect_lib=yes
-AC_CHECK_LIB([snappy], [snappy_compress], [], [snappy_detect_hdr=no])
+AC_CHECK_LIB([snappy], [snappy_compress], [snappy_detect_hdr=yes], [snappy_detect_hdr=no])
 AC_CHECK_HEADER([snappy.h],,[snappy_detect_lib=no])
 AC_ARG_ENABLE([snappy], [AS_HELP_STRING([--enable-snappy],
               [build with Snappy @<:@default: auto@:>@])],
-              [snappy=${enableval}], [snappy=no])
+              [snappy=${enableval}], [snappy=auto])
+if test x"${snappy}" = xno; then
+snappy_detect_hdr=no
+snappy_detect_lib=no
+fi
 if test x"${snappy}" = xyes; then
     if test x"${snappy_detect_hdr}" != xyes; then
         AC_MSG_ERROR([

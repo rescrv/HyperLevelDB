@@ -38,9 +38,11 @@ namespace leveldb {
 
 BlockBuilder::BlockBuilder(const Options* options)
     : options_(options),
+      buffer_(),
       restarts_(),
       counter_(0),
-      finished_(false) {
+      finished_(false),
+      last_key_() {
   assert(options->block_restart_interval >= 1);
   restarts_.push_back(0);       // First restart point is at offset 0
 }
@@ -67,21 +69,25 @@ Slice BlockBuilder::Finish() {
   }
   PutFixed32(&buffer_, restarts_.size());
   finished_ = true;
-  return Slice(buffer_);
+  return buffer_.slice();
 }
 
 void BlockBuilder::Add(const Slice& key, const Slice& value) {
-  Slice last_key_piece(last_key_);
+  Slice last_key_piece = last_key_.slice();
   assert(!finished_);
   assert(counter_ <= options_->block_restart_interval);
+#ifdef STRICT_ASSERT
   assert(buffer_.empty() // No values yet?
          || options_->comparator->Compare(key, last_key_piece) > 0);
+#endif
   size_t shared = 0;
   if (counter_ < options_->block_restart_interval) {
     // See how much sharing to do with previous string
     const size_t min_length = std::min(last_key_piece.size(), key.size());
-    while ((shared < min_length) && (last_key_piece[shared] == key[shared])) {
-      shared++;
+    const char* A = last_key_piece.data();
+    const char* B = key.data();
+    while ((shared < min_length) && (A[shared] == B[shared])) {
+      ++shared;
     }
   } else {
     // Restart compression
@@ -100,9 +106,9 @@ void BlockBuilder::Add(const Slice& key, const Slice& value) {
   buffer_.append(value.data(), value.size());
 
   // Update state
-  last_key_.resize(shared);
+  last_key_.shrink(shared);
   last_key_.append(key.data() + shared, non_shared);
-  assert(Slice(last_key_) == key);
+  assert(last_key_.slice() == key);
   counter_++;
 }
 

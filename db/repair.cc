@@ -54,6 +54,12 @@ class Repairer {
         options_(SanitizeOptions(dbname, &icmp_, &ipolicy_, options)),
         owns_info_log_(options_.info_log != options.info_log),
         owns_cache_(options_.block_cache != options.block_cache),
+        table_cache_(),
+        edit_(),
+        manifests_(),
+        table_numbers_(),
+        logs_(),
+        tables_(),
         next_file_number_(1) {
     // TableCache can be small since we expect each table to be opened once.
     table_cache_ = new TableCache(dbname_, &options_, 10);
@@ -94,7 +100,10 @@ class Repairer {
   }
 
  private:
+  Repairer(const Repairer&);
+  Repairer& operator = (const Repairer&);
   struct TableInfo {
+    TableInfo() : meta(), max_sequence() {}
     FileMetaData meta;
     SequenceNumber max_sequence;
   };
@@ -163,6 +172,11 @@ class Repairer {
 
   Status ConvertLogToTable(uint64_t log) {
     struct LogReporter : public log::Reader::Reporter {
+      LogReporter()
+        : env(),
+          info_log(),
+          lognum() {
+      }
       Env* env;
       Logger* info_log;
       uint64_t lognum;
@@ -173,6 +187,9 @@ class Repairer {
             static_cast<int>(bytes),
             s.ToString().c_str());
       }
+     private:
+      LogReporter(const LogReporter&);
+      LogReporter& operator = (const LogReporter&);
     };
 
     // Open the log file

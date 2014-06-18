@@ -366,6 +366,8 @@ class EnvWrapper : public Env {
     target_->SleepForMicroseconds(micros);
   }
  private:
+  EnvWrapper(EnvWrapper&);
+  EnvWrapper& operator = (EnvWrapper&);
   Env* target_;
 };
 

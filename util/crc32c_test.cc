@@ -47,6 +47,18 @@ TEST(CRC, StandardResults) {
   ASSERT_EQ(0xd9963a56, Value(reinterpret_cast<char*>(data), sizeof(data)));
 }
 
+TEST(CRC, LargeBuffer) {
+  std::string tmp("A");
+  while (tmp.size() < 4096) {
+    tmp = tmp + tmp;
+  }
+  ASSERT_EQ(0x3c36f666, Value(tmp.data(), 64));
+  ASSERT_EQ(0xf6607a92, Value(tmp.data(), 1024));
+  ASSERT_EQ(0xa9bc21ef, Value(tmp.data(), 1111));
+  ASSERT_EQ(0x88ddb66b, Value(tmp.data(), 2048));
+  ASSERT_EQ(0x057251e9, Value(tmp.data(), 4096));
+}
+
 TEST(CRC, Values) {
   ASSERT_NE(Value("a", 1), Value("foo", 3));
 }

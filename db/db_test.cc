@@ -991,10 +991,10 @@ TEST(DBTest, CompactionsGenerateMultipleFiles) {
 
   Random rnd(301);
 
-  // Write 9MB (90 values, each 100K)
+  // Write 96MB (960 values, each 100K)
   ASSERT_EQ(NumTableFilesAtLevel(0), 0);
   std::vector<std::string> values;
-  for (int i = 0; i < 90; i++) {
+  for (int i = 0; i < 960; i++) {
     values.push_back(RandomString(&rnd, 100000));
     ASSERT_OK(Put(Key(i), values[i]));
   }
@@ -1005,7 +1005,7 @@ TEST(DBTest, CompactionsGenerateMultipleFiles) {
 
   ASSERT_EQ(NumTableFilesAtLevel(0), 0);
   ASSERT_GT(NumTableFilesAtLevel(1), 1);
-  for (int i = 0; i < 80; i++) {
+  for (int i = 0; i < 960; i++) {
     ASSERT_EQ(Get(Key(i)), values[i]);
   }
 }
@@ -1962,11 +1962,12 @@ class ModelDB: public DB {
     virtual void Prev() { --iter_; }
     virtual Slice key() const { return iter_->first; }
     virtual Slice value() const { return iter_->second; }
-    virtual Status status() const { return Status::OK(); }
+    virtual const Status& status() const { return status_; }
    private:
     const KVMap* const map_;
     const bool owned_;  // Do we own map_
     KVMap::const_iterator iter_;
+    Status status_;
   };
   const Options options_;
   KVMap map_;

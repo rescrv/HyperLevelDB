@@ -118,8 +118,11 @@ bool InternalFilterPolicy::KeyMayMatch(const Slice& key, const Slice& f) const {
   return user_policy_->KeyMayMatch(ExtractUserKey(key), f);
 }
 
-LookupKey::LookupKey(const Slice& user_key, SequenceNumber s) {
-  size_t usize = user_key.size();
+LookupKey::LookupKey(const Slice& ukey, SequenceNumber s)
+  : start_(),
+    kstart_(),
+    end_() {
+  size_t usize = ukey.size();
   size_t needed = usize + 13;  // A conservative estimate
   char* dst;
   if (needed <= sizeof(space_)) {
@@ -130,7 +133,7 @@ LookupKey::LookupKey(const Slice& user_key, SequenceNumber s) {
   start_ = dst;
   dst = EncodeVarint32(dst, usize + 8);
   kstart_ = dst;
-  memcpy(dst, user_key.data(), usize);
+  memcpy(dst, ukey.data(), usize);
   dst += usize;
   EncodeFixed64(dst, PackSequenceAndType(s, kValueTypeForSeek));
   dst += 8;

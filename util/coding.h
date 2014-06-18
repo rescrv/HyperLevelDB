@@ -15,6 +15,7 @@
 #include <string>
 #include "hyperleveldb/slice.h"
 #include "port/port.h"
+#include "util/string_builder.h"
 
 namespace leveldb {
 
@@ -24,6 +25,8 @@ extern void PutFixed64(std::string* dst, uint64_t value);
 extern void PutVarint32(std::string* dst, uint32_t value);
 extern void PutVarint64(std::string* dst, uint64_t value);
 extern void PutLengthPrefixedSlice(std::string* dst, const Slice& value);
+extern void PutFixed32(StringBuilder* dst, uint32_t value);
+extern void PutVarint32(StringBuilder* dst, uint32_t value);
 
 // Standard Get... routines parse a value from the beginning of a Slice
 // and advance the slice past the parsed value.

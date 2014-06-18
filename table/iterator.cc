@@ -6,7 +6,8 @@
 
 namespace leveldb {
 
-Iterator::Iterator() {
+Iterator::Iterator()
+  : cleanup_() {
   cleanup_.function = NULL;
   cleanup_.next = NULL;
 }
@@ -43,14 +44,14 @@ class EmptyIterator : public Iterator {
  public:
   EmptyIterator(const Status& s) : status_(s) { }
   virtual bool Valid() const { return false; }
-  virtual void Seek(const Slice& target) { }
+  virtual void Seek(const Slice& /*target*/) { }
   virtual void SeekToFirst() { }
   virtual void SeekToLast() { }
   virtual void Next() { assert(false); }
   virtual void Prev() { assert(false); }
   Slice key() const { assert(false); return Slice(); }
   Slice value() const { assert(false); return Slice(); }
-  virtual Status status() const { return status_; }
+  virtual const Status& status() const { return status_; }
  private:
   Status status_;
 };

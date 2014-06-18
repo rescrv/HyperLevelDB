@@ -16,6 +16,13 @@
 #include "hyperleveldb/status.h"
 #include "hyperleveldb/write_batch.h"
 
+// Fixing all these warnings is burdensome, and we don't advocate this code's
+// usage.  It will be no more incorrect than LevelDB, and it will stay out of
+// our way with these pragmas
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Weffc++"
+
 using leveldb::Cache;
 using leveldb::Comparator;
 using leveldb::CompressionType;
@@ -80,7 +87,7 @@ struct leveldb_comparator_t : public Comparator {
 
   // No-ops since the C binding does not support key shortening methods.
   virtual void FindShortestSeparator(std::string*, const Slice&) const { }
-  virtual void FindShortSuccessor(std::string* key) const { }
+  virtual void FindShortSuccessor(std::string* /*key*/) const { }
 };
 
 struct leveldb_filterpolicy_t : public FilterPolicy {
@@ -593,3 +600,5 @@ int leveldb_minor_version() {
 }
 
 }  // end extern "C"
+
+#pragma GCC diagnostic pop

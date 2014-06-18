@@ -86,6 +86,8 @@ class HandleTable {
   }
 
  private:
+  HandleTable(const HandleTable&);
+  HandleTable& operator = (const HandleTable&);
   // The table consists of an array of buckets where each bucket is
   // a linked list of cache entries that hash into the bucket.
   uint32_t length_;
@@ -168,7 +170,11 @@ class LRUCache {
 };
 
 LRUCache::LRUCache()
-    : usage_(0) {
+    : capacity_(),
+      mutex_(),
+      usage_(0),
+      lru_(),
+      table_() {
   // Make empty circular linked list
   lru_.next = &lru_;
   lru_.prev = &lru_;
@@ -246,7 +252,7 @@ Cache::Handle* LRUCache::Insert(
   }
 
   while (usage_ > capacity_ && lru_.next != &lru_) {
-    LRUHandle* old = lru_.next;
+    old = lru_.next;
     LRU_Remove(old);
     table_.Remove(old->key(), old->hash);
     Unref(old);
@@ -264,8 +270,11 @@ void LRUCache::Erase(const Slice& key, uint32_t hash) {
   }
 }
 
-static const int kNumShardBits = 4;
-static const int kNumShards = 1 << kNumShardBits;
+static const unsigned kNumShardBits = 4;
+static const unsigned kNumShards = 1 << kNumShardBits;
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunsafe-loop-optimizations"
 
 class ShardedLRUCache : public Cache {
  private:
@@ -283,9 +292,10 @@ class ShardedLRUCache : public Cache {
 
  public:
   explicit ShardedLRUCache(size_t capacity)
-      : last_id_(0) {
+      : id_mutex_(),
+        last_id_(0) {
     const size_t per_shard = (capacity + (kNumShards - 1)) / kNumShards;
-    for (int s = 0; s < kNumShards; s++) {
+    for (unsigned s = 0; s < kNumShards; s++) {
       shard_[s].SetCapacity(per_shard);
     }
   }
@@ -315,6 +325,8 @@ class ShardedLRUCache : public Cache {
     return ++(last_id_);
   }
 };
+
+#pragma GCC diagnostic pop
 
 }  // end anonymous namespace
 

@@ -133,7 +133,7 @@ main(int argc, const char* argv[])
         t->start();
     }
 
-    for (size_t i = 0; i < _threads; ++i)
+    for (long i = 0; i < _threads; ++i)
     {
         thread_ptr t(new po6::threads::thread(std::tr1::bind(worker_thread, db, dl,
                                               key_parser->config(), value_parser->config())));
@@ -213,6 +213,8 @@ worker_thread(leveldb::DB* db,
     armnod_generator* val(armnod_generator_create(_v));
         const char* v = armnod_generate(val);
         size_t v_sz = strlen(v);
+    armnod_seed(key, pthread_self());
+    armnod_seed(val, pthread_self());
 
     while (__sync_fetch_and_add(&_done, 1) < _number)
     {

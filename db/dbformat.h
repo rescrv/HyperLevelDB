@@ -19,18 +19,18 @@ namespace leveldb {
 // Grouping of constants.  We may want to make some of these
 // parameters set via options.
 namespace config {
-static const int kNumLevels = 7;
+static const unsigned kNumLevels = 7;
 
 // Level-0 compaction is started when we hit this many files.
-static const int kL0_CompactionTrigger = 4;
+static const unsigned kL0_CompactionTrigger = 4;
 
 // Soft limit on number of level-0 files.  We could slow down writes at this
 // point, but don't.
-static const int kL0_SlowdownWritesTrigger = 8;
+static const unsigned kL0_SlowdownWritesTrigger = 8;
 
 // Maximum number of level-0 files.  We could stop writes at this point, but
 // don't.
-static const int kL0_StopWritesTrigger = 12;
+static const unsigned kL0_StopWritesTrigger = 12;
 
 // Maximum level to which a new compacted memtable is pushed if it
 // does not create overlap.  We try to push to level 2 to avoid the
@@ -38,10 +38,10 @@ static const int kL0_StopWritesTrigger = 12;
 // expensive manifest file operations.  We do not push all the way to
 // the largest level since that can generate a lot of wasted disk
 // space if the same key space is being repeatedly overwritten.
-static const int kMaxMemCompactLevel = 2;
+static const unsigned kMaxMemCompactLevel = 2;
 
 // Approximate gap in bytes between samples of data read during iteration.
-static const int kReadBytesPeriod = 1048576;
+static const unsigned kReadBytesPeriod = 1048576;
 
 }  // namespace config
 

@@ -4,6 +4,8 @@
 
 #include "table/merger.h"
 
+#include <algorithm>
+
 #include "hyperleveldb/comparator.h"
 #include "hyperleveldb/iterator.h"
 #include "table/iterator_wrapper.h"
@@ -11,18 +13,36 @@
 namespace leveldb {
 
 namespace {
+class MergingIterator;
+
+struct HeapComparator {
+  HeapComparator(MergingIterator* mi) : mi_(mi) {}
+  HeapComparator(const HeapComparator& other) : mi_(other.mi_) {}
+
+  MergingIterator* mi_;
+
+  bool operator () (unsigned lhs, unsigned rhs) const;
+
+  private:
+    HeapComparator& operator = (const HeapComparator&);
+};
+
 class MergingIterator : public Iterator {
  private:
   void ReinitializeComparisons();
-  void ReinitializeCurrentComparison();
+  void PopCurrentComparison();
+  void PushCurrentComparison();
  public:
   MergingIterator(const Comparator* comparator, Iterator** children, int n)
       : comparator_(comparator),
         children_(new IteratorWrapper[n]),
         comparisons_(new uint64_t[n]),
+        heap_(new unsigned[n]),
+        heap_sz_(0),
         n_(n),
         comparisons_intialized_(false),
         current_(NULL),
+        status_(),
         direction_(kForward) {
     for (int i = 0; i < n; i++) {
       children_[i].Set(children[i]);
@@ -42,27 +62,27 @@ class MergingIterator : public Iterator {
     for (int i = 0; i < n_; i++) {
       children_[i].SeekToFirst();
     }
+    direction_ = kForward;
     ReinitializeComparisons();
     FindSmallest();
-    direction_ = kForward;
   }
 
   virtual void SeekToLast() {
     for (int i = 0; i < n_; i++) {
       children_[i].SeekToLast();
     }
+    direction_ = kReverse;
     ReinitializeComparisons();
     FindLargest();
-    direction_ = kReverse;
   }
 
   virtual void Seek(const Slice& target) {
     for (int i = 0; i < n_; i++) {
       children_[i].Seek(target);
     }
+    direction_ = kForward;
     ReinitializeComparisons();
     FindSmallest();
-    direction_ = kForward;
   }
 
   virtual void Next() {
@@ -84,12 +104,13 @@ class MergingIterator : public Iterator {
           }
         }
       }
-      ReinitializeComparisons();
       direction_ = kForward;
+      ReinitializeComparisons();
     }
 
+    PopCurrentComparison();
     current_->Next();
-    ReinitializeCurrentComparison();
+    PushCurrentComparison();
     FindSmallest();
   }
 
@@ -115,12 +136,13 @@ class MergingIterator : public Iterator {
           }
         }
       }
-      ReinitializeComparisons();
       direction_ = kReverse;
+      ReinitializeComparisons();
     }
 
+    PopCurrentComparison();
     current_->Prev();
-    ReinitializeCurrentComparison();
+    PushCurrentComparison();
     FindLargest();
   }
 
@@ -134,30 +156,32 @@ class MergingIterator : public Iterator {
     return current_->value();
   }
 
-  virtual Status status() const {
-    Status status;
+  virtual const Status& status() const {
+    // XXX this value can easily be cached
     for (int i = 0; i < n_; i++) {
-      status = children_[i].status();
-      if (!status.ok()) {
-        break;
+      if (!children_[i].status().ok()) {
+        return children_[i].status();
       }
     }
-    return status;
+    return status_;
   }
 
  private:
+  MergingIterator(const MergingIterator&);
+  MergingIterator& operator = (const MergingIterator&);
+  friend class HeapComparator;
   void FindSmallest();
   void FindLargest();
 
-  // We might want to use a heap in case there are lots of children.
-  // For now we use a simple array since we expect a very small number
-  // of children in leveldb.
   const Comparator* comparator_;
   IteratorWrapper* children_;
   uint64_t* comparisons_;
+  unsigned* heap_;
+  size_t heap_sz_;
   int n_;
   bool comparisons_intialized_;
   IteratorWrapper* current_;
+  Status status_;
 
   // Which direction is the iterator moving?
   enum Direction {
@@ -167,58 +191,64 @@ class MergingIterator : public Iterator {
   Direction direction_;
 };
 
+bool HeapComparator::operator ()(unsigned lhs, unsigned rhs) const {
+  if (mi_->direction_ == MergingIterator::kForward) {
+    std::swap(lhs, rhs);
+  }
+  return mi_->comparisons_[lhs] < mi_->comparisons_[rhs] ||
+         (mi_->comparisons_[lhs] == mi_->comparisons_[rhs] &&
+          mi_->comparator_->Compare(mi_->children_[lhs].key(), mi_->children_[rhs].key()) < 0);
+}
+
 void MergingIterator::ReinitializeComparisons() {
+  heap_sz_ = 0;
   for (int i = 0; i < n_; ++i) {
     if (children_[i].Valid()) {
       comparisons_[i] = comparator_->KeyNum(children_[i].key());
+      heap_[heap_sz_] = i;
+      ++heap_sz_;
     }
   }
+  HeapComparator hc(this);
+  std::make_heap(heap_, heap_ + heap_sz_, hc);
 }
 
-void MergingIterator::ReinitializeCurrentComparison() {
+void MergingIterator::PopCurrentComparison() {
+  unsigned idx = current_ - children_;
+  assert(heap_[0] == idx);
+  HeapComparator hc(this);
+  std::pop_heap(heap_, heap_ + heap_sz_, hc);
+  --heap_sz_;
+}
+
+void MergingIterator::PushCurrentComparison() {
+  unsigned idx = current_ - children_;
+  assert(&children_[idx] == current_);
   if (current_->Valid()) {
-    comparisons_[current_ - children_] = comparator_->KeyNum(current_->key());
+    comparisons_[idx] = comparator_->KeyNum(current_->key());
+    heap_[heap_sz_] = idx;
+    ++heap_sz_;
+    HeapComparator hc(this);
+    std::push_heap(heap_, heap_ + heap_sz_, hc);
   }
 }
 
 void MergingIterator::FindSmallest() {
-  size_t smallest_idx = 0;
-  IteratorWrapper* smallest = NULL;
-  for (int i = 0; i < n_; i++) {
-    IteratorWrapper* child = &children_[i];
-    if (child->Valid()) {
-      if (smallest == NULL) {
-        smallest = child;
-        smallest_idx = i;
-      } else if (comparisons_[i] < comparisons_[smallest_idx] ||
-                 (comparisons_[i] == comparisons_[smallest_idx] &&
-                  comparator_->Compare(child->key(), smallest->key()) < 0)) {
-        smallest = child;
-        smallest_idx = i;
-      }
-    }
+  assert(direction_ == kForward);
+  if (heap_sz_ > 0) {
+    current_ = &children_[heap_[0]];
+  } else {
+    current_ = NULL;
   }
-  current_ = smallest;
 }
 
 void MergingIterator::FindLargest() {
-  size_t largest_idx = 0;
-  IteratorWrapper* largest = NULL;
-  for (int i = n_-1; i >= 0; i--) {
-    IteratorWrapper* child = &children_[i];
-    if (child->Valid()) {
-      if (largest == NULL) {
-        largest = child;
-        largest_idx = i;
-      } else if (comparisons_[i] > comparisons_[largest_idx] ||
-                 (comparisons_[i] == comparisons_[largest_idx] &&
-                  comparator_->Compare(child->key(), largest->key()) > 0)) {
-        largest = child;
-        largest_idx = i;
-      }
-    }
+  assert(direction_ == kReverse);
+  if (heap_sz_ > 0) {
+    current_ = &children_[heap_[0]];
+  } else {
+    current_ = NULL;
   }
-  current_ = largest;
 }
 }  // namespace
 

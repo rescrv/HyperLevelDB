@@ -16,7 +16,12 @@ static const size_t kFilterBaseLg = 11;
 static const size_t kFilterBase = 1 << kFilterBaseLg;
 
 FilterBlockBuilder::FilterBlockBuilder(const FilterPolicy* policy)
-    : policy_(policy) {
+    : policy_(policy),
+      keys_(),
+      start_(),
+      result_(),
+      tmp_keys_(),
+      filter_offsets_() {
 }
 
 void FilterBlockBuilder::StartBlock(uint64_t block_offset) {

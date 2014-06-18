@@ -59,7 +59,7 @@ class Table {
   struct Rep;
   Rep* rep_;
 
-  explicit Table(Rep* rep) { rep_ = rep; }
+  explicit Table(Rep* rep) : rep_(rep) { }
   static Iterator* BlockReader(void*, const ReadOptions&, const Slice&);
 
   // Calls (*handle_result)(arg, ...) with the entry found after a call

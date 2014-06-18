@@ -28,7 +28,7 @@
 ACLOCAL_AMFLAGS = -I m4 ${ACLOCAL_FLAGS}
 AM_CPPFLAGS = -I${abs_top_srcdir}/include
 AM_CFLAGS = -DLEVELDB_PLATFORM_POSIX $(SNAPPY_FLAGS) ${EXTRA_CFLAGS} $(WANAL_CFLAGS)
-AM_CXXFLAGS = -DLEVELDB_PLATFORM_POSIX $(SNAPPY_FLAGS) ${EXTRA_CFLAGS} $(WANAL_CXXFLAGS)
+AM_CXXFLAGS = -DLEVELDB_PLATFORM_POSIX $(SNAPPY_FLAGS) ${EXTRA_CFLAGS} $(WANAL_CXXFLAGS) -Wno-variadic-macros
 AM_MAKEFLAGS = --no-print-directory
 
 pkgconfigdir = $(libdir)/pkgconfig
@@ -152,7 +152,7 @@ libhyperleveldb_la_SOURCES += util/options.cc
 libhyperleveldb_la_SOURCES += util/status.cc
 libhyperleveldb_la_SOURCES += port/port_posix.cc
 libhyperleveldb_la_LIBADD = $(SNAPPY_LIBS) -lpthread
-libhyperleveldb_la_LDFLAGS = -lpthread
+libhyperleveldb_la_LDFLAGS = -lpthread $(AM_LDFLAGS) $(LDFLAGS)
 
 TESTUTIL = util/testutil.cc
 TESTHARNESS = util/testharness.cc $(TESTUTIL)

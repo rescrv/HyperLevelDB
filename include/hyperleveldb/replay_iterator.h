@@ -53,6 +53,7 @@ class ReplayIterator {
  protected:
   // must be released by giving it back to the DB
   virtual ~ReplayIterator();
+  friend class DB;
 
  private:
   // No copying allowed

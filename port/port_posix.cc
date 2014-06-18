@@ -19,7 +19,7 @@ static void PthreadCall(const char* label, int result) {
   }
 }
 
-Mutex::Mutex() { PthreadCall("init mutex", pthread_mutex_init(&mu_, NULL)); }
+Mutex::Mutex() : mu_() { PthreadCall("init mutex", pthread_mutex_init(&mu_, NULL)); }
 
 Mutex::~Mutex() { PthreadCall("destroy mutex", pthread_mutex_destroy(&mu_)); }
 
@@ -28,7 +28,8 @@ void Mutex::Lock() { PthreadCall("lock", pthread_mutex_lock(&mu_)); }
 void Mutex::Unlock() { PthreadCall("unlock", pthread_mutex_unlock(&mu_)); }
 
 CondVar::CondVar(Mutex* mu)
-    : mu_(mu) {
+    : cv_(),
+      mu_(mu) {
     PthreadCall("init cv", pthread_cond_init(&cv_, NULL));
 }
 

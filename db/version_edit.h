@@ -27,7 +27,22 @@ struct FileMetaData {
 
 class VersionEdit {
  public:
-  VersionEdit() { Clear(); }
+  VersionEdit()
+    : comparator_(),
+      log_number_(),
+      prev_log_number_(),
+      next_file_number_(),
+      last_sequence_(),
+      has_comparator_(),
+      has_log_number_(),
+      has_prev_log_number_(),
+      has_next_file_number_(),
+      has_last_sequence_(),
+      compact_pointers_(),
+      deleted_files_(),
+      new_files_() {
+    Clear();
+  }
   ~VersionEdit() { }
 
   void Clear();

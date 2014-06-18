@@ -81,9 +81,6 @@ void ReplayIteratorImpl::SkipToLast() {
   }
 }
 
-void SkipTo(const Slice& target) {
-}
-
 bool ReplayIteratorImpl::HasValue() {
   ParsedInternalKey ikey;
   return ParseKey(&ikey) && ikey.type == kTypeValue;

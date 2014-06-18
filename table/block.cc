@@ -23,6 +23,7 @@ inline uint32_t Block::NumRestarts() const {
 Block::Block(const BlockContents& contents)
     : data_(contents.data.data()),
       size_(contents.data.size()),
+      restart_offset_(),
       owned_(contents.heap_allocated) {
   if (size_ < sizeof(uint32_t)) {
     size_ = 0;  // Error marker
@@ -75,6 +76,8 @@ static inline const char* DecodeEntry(const char* p, const char* limit,
 
 class Block::Iter : public Iterator {
  private:
+  Iter(const Iter&);
+  Iter& operator = (const Iter&);
   const Comparator* const comparator_;
   const char* const data_;      // underlying block contents
   uint32_t const restarts_;     // Offset of restart array (list of fixed32)
@@ -121,12 +124,15 @@ class Block::Iter : public Iterator {
         restarts_(restarts),
         num_restarts_(num_restarts),
         current_(restarts_),
-        restart_index_(num_restarts_) {
+        restart_index_(num_restarts_),
+        key_(),
+        value_(),
+        status_() {
     assert(num_restarts_ > 0);
   }
 
   virtual bool Valid() const { return current_ < restarts_; }
-  virtual Status status() const { return status_; }
+  virtual const Status& status() const { return status_; }
   virtual Slice key() const {
     assert(Valid());
     return key_;

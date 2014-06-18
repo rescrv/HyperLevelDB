@@ -44,6 +44,8 @@ uint32_t Hash(const char* data, size_t n, uint32_t seed) {
       h *= m;
       h ^= (h >> r);
       break;
+    default:
+      break;
   }
   return h;
 }

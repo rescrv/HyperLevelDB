@@ -28,6 +28,7 @@ struct Arena::Block {
   }
   ~Block() throw () {
     uint32_t r = atomic::load_32_acquire(&rem);
+    (void) r;
     if (base) {
       munmap(base, size);
     }
@@ -39,6 +40,9 @@ struct Arena::Block {
   char* next_upper;
   char* base;
   uint32_t size;
+ private:
+  Block(const Block&);
+  Block& operator = (const Block&);
 };
 
 Arena::Arena()
@@ -162,6 +166,7 @@ char* Arena::AllocateFinalize(Block* b, size_t bytes) {
   char* nl = load_ptr_nobarrier(&b->next_lower);
   char* nu = load_ptr_nobarrier(&b->next_upper);
   uint32_t x = load_32_nobarrier(&b->rem);
+  (void) x;
   assert(nl <= nu);
   assert(load_ptr_nobarrier(&b->next_lower) <=
          load_ptr_nobarrier(&b->next_upper));

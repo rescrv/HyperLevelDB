@@ -48,6 +48,8 @@ class TableCache {
   void Evict(uint64_t file_number);
 
  private:
+  TableCache(const TableCache&);
+  TableCache& operator = (const TableCache&);
   Env* const env_;
   const std::string dbname_;
   const Options* options_;

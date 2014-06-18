@@ -79,6 +79,10 @@ class WriteBatchItemPrinter : public WriteBatch::Handler {
     printf("  del '%s'\n",
            EscapeString(key).c_str());
   }
+  WriteBatchItemPrinter()
+    : offset_(),
+      sequence_() {
+  }
 };
 
 
@@ -192,6 +196,10 @@ bool DumpFile(Env* env, const std::string& fname) {
     case kDescriptorFile:  return DumpDescriptor(env, fname);
     case kTableFile:       return DumpTable(env, fname);
 
+    case kDBLockFile:
+    case kCurrentFile:
+    case kTempFile:
+    case kInfoLogFile:
     default: {
       fprintf(stderr, "%s: not a dump-able file type\n", fname.c_str());
       break;
