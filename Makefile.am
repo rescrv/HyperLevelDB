@@ -160,11 +160,11 @@ TESTHARNESS = util/testharness.cc $(TESTUTIL)
 noinst_PROGRAMS =
 noinst_PROGRAMS += db_bench
 noinst_PROGRAMS += leveldbutil
-noinst_PROGRAMS += leveldb-dump-all
 noinst_PROGRAMS += leveldb-verify
 
 EXTRA_PROGRAMS =
 EXTRA_PROGRAMS += benchmark
+EXTRA_PROGRAMS += leveldb-dump-all
 EXTRA_PROGRAMS += db_bench_sqlite3
 EXTRA_PROGRAMS += db_bench_tree_db
 
