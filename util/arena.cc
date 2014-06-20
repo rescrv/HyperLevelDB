@@ -10,6 +10,10 @@
 
 #define BLOCK_SIZE 65536
 
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS MAP_ANON
+#endif
+
 namespace leveldb {
 
 struct Arena::Block {
