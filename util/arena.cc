@@ -108,7 +108,7 @@ Arena::Block* Arena::NewBlock(size_t bytes) {
   const size_t sz = (bytes + page_size_ - 1) & ~(page_size_ - 1);
   assert(sz / page_size_ * page_size_ == sz);
   Block* nb = new Block();
-  void* ptr = mmap(NULL, sz, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, 0, 0);
+  void* ptr = mmap(NULL, sz, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
   if (ptr == MAP_FAILED) {
     throw std::bad_alloc();
   }

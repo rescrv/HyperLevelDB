@@ -80,7 +80,7 @@
 #error "no fwrite found"
 #endif
 
-#ifdef HAVE_DECL_FDATASYNC
+#if HAVE_DECL_FDATASYNC
 // do nothing
 #elif HAVE_FSYNC
 #define fdatasync fsync
