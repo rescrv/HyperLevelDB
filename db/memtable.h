@@ -31,7 +31,7 @@ class MemTable {
   void Unref() {
     uint64_t ref = atomic::increment_64_fullbarrier(&refs_, -1);
     assert(ref >= 0);
-    if (refs_ == 0) {
+    if (ref == 0) {
       delete this;
     }
   }
