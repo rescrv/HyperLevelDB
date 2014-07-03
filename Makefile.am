@@ -105,6 +105,7 @@ noinst_HEADERS += util/logging.h
 noinst_HEADERS += util/mutexlock.h
 noinst_HEADERS += util/posix_logger.h
 noinst_HEADERS += util/random.h
+noinst_HEADERS += util/string_builder.h
 noinst_HEADERS += util/testharness.h
 noinst_HEADERS += util/testutil.h
 
