@@ -97,6 +97,7 @@ noinst_HEADERS += table/iterator_wrapper.h
 noinst_HEADERS += table/merger.h
 noinst_HEADERS += table/two_level_iterator.h
 noinst_HEADERS += util/arena.h
+noinst_HEADERS += util/atomic.h
 noinst_HEADERS += util/coding.h
 noinst_HEADERS += util/crc32c.h
 noinst_HEADERS += util/hash.h
