@@ -154,7 +154,7 @@ libhyperleveldb_la_SOURCES += util/options.cc
 libhyperleveldb_la_SOURCES += util/status.cc
 libhyperleveldb_la_SOURCES += port/port_posix.cc
 libhyperleveldb_la_LIBADD = $(SNAPPY_LIBS) -lpthread
-libhyperleveldb_la_LDFLAGS = -lpthread $(AM_LDFLAGS) $(LDFLAGS) -version-info 1:0:0
+libhyperleveldb_la_LDFLAGS = -lpthread $(AM_LDFLAGS) $(LDFLAGS) -version-info 1:1:0
 
 TESTUTIL = util/testutil.cc
 TESTHARNESS = util/testharness.cc $(TESTUTIL)
