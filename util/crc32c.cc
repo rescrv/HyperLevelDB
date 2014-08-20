@@ -90,7 +90,7 @@ choose_crc32c() {
   cpuid_t xd;
   cpuid(xa, xb, xc, xd, 1);
   if (xc & (1<<20)) {
-    return crc32_sse42_quads;
+    //return crc32_sse42_quads;
   }
 #endif
   return crc32_software;
