@@ -62,7 +62,8 @@ class DBIter: public Iterator {
         direction_(kForward),
         valid_(false),
         rnd_(seed),
-        bytes_counter_(RandomPeriod()) {
+        bytes_counter_(RandomPeriod()),
+        tombstones_counter_(0) {
   }
   virtual ~DBIter() {
     delete iter_;
@@ -126,6 +127,7 @@ class DBIter: public Iterator {
 
   Random rnd_;
   ssize_t bytes_counter_;
+  ssize_t tombstones_counter_;
 
   // No copying allowed
   DBIter(const DBIter&);
@@ -144,6 +146,13 @@ inline bool DBIter::ParseKey(ParsedInternalKey* ikey) {
     status_ = Status::Corruption("corrupted internal key in DBIter");
     return false;
   } else {
+    if (ikey->type == kTypeDeletion) {
+        ++tombstones_counter_;
+        if (tombstones_counter_ > 64) {
+            db_->RecordReadSample(k);
+            tombstones_counter_ = 0;
+        }
+    }
     return true;
   }
 }
