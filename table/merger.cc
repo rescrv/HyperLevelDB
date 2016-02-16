@@ -52,6 +52,8 @@ class MergingIterator : public Iterator {
 
   virtual ~MergingIterator() {
     delete[] children_;
+    delete[] comparisons_;
+    delete[] heap_;
   }
 
   virtual bool Valid() const {
